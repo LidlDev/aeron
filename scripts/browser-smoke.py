@@ -13,7 +13,7 @@ with sync_playwright() as p:
  def goto(route,title):
   page.goto(BASE+'/#/'+route,wait_until='domcontentloaded')
   expect(page.get_by_role('heading',name=title,exact=True)).to_be_visible(timeout=30000)
- def database(): return page.evaluate("JSON.parse(localStorage.getItem('aeron.database.v1'))")
+ def database(): return page.evaluate("JSON.parse(localStorage.getItem('aeron.database.v2') || localStorage.getItem('aeron.database.v1'))")
  def report(text): print('PASS',text,flush=True)
  goto('onboarding','TRAIN WITH INTENT.')
  page.get_by_role('button',name='Build my training system',exact=True).click()
@@ -32,12 +32,13 @@ with sync_playwright() as p:
  expect(page.get_by_role('button',name='Enter AERON')).to_be_visible(timeout=15000)
  page.get_by_role('button',name='Enter AERON').click()
  assert database()['athlete']['name']=='Jordan'
- assert list(database()['plans'].values())[-1]['weeks'][0]==360
+ assert list(database()['plans'].values())[-1]['capacityMinutes'][0]==360
  report('Onboarding uses athlete name and baseline to generate plan')
- goto('calendar','TRAINING CALENDAR.')
- assert page.locator('.calendar-workout').count()>0
+ goto('calendar','Training calendar')
+ page.get_by_role('button',name='Week agenda',exact=True).click()
+ assert page.locator('.session-row').count()>0
  report('Generated plan appears in calendar')
- goto('running','RUNNING.')
+ goto('running','Running')
  card=page.locator('.library-card').filter(has=page.get_by_role('heading',name='Threshold intervals',exact=True))
  card.get_by_role('button',name='Explore session').click()
  dlg=page.get_by_role('dialog')
@@ -48,23 +49,23 @@ with sync_playwright() as p:
  dlg.get_by_role('button',name='Add to calendar',exact=True).click()
  db=database();saved=next(s for s in db['sessions'].values() if db['workouts'][s['workoutId']]['title']=='My threshold test')
  report('Running intervals accurate; customized workout saved to calendar')
- goto('calendar','TRAINING CALENDAR.')
- page.get_by_role('button').filter(has=page.get_by_role('heading',name='My threshold test',exact=True)).click()
+ goto('calendar','Training calendar')
+ page.locator('.session-row-main').filter(has_text='My threshold test').click()
  page.get_by_role('dialog').get_by_role('button',name='Mark complete',exact=True).click()
  assert database()['sessions'][saved['id']]['status']=='completed'
  report('Workout completion persisted to training history')
- goto('analytics','PROOF OF THE PROCESS.')
+ goto('analytics','Performance analytics')
  assert len(database()['activities'])>0
  report('Analytics renders completed training')
- goto('strength','STRONGER FOR LONGER.')
+ goto('strength','Strength training')
  page.get_by_role('button',name='Start Strength A',exact=True).click()
- page.get_by_label('Goblet squat set 1 reps',exact=True).fill('10')
- page.get_by_label('Goblet squat set 1 weight in kg',exact=True).fill('20')
- page.get_by_role('button',name='Complete Goblet squat set 1',exact=True).click()
+ page.get_by_label('Goblet squat set 2 reps',exact=True).fill('10')
+ page.get_by_label('Goblet squat set 2 weight in kg',exact=True).fill('20')
+ page.get_by_role('button',name='Complete Goblet squat set 2',exact=True).click()
  page.get_by_role('button',name='Complete strength session',exact=True).click()
  assert any(l['completed'] and any(s['weight']==20 and s['reps']==10 and s['done'] for s in l['sets']) for l in database()['strengthLogs'].values())
  report('Strength sets, reps, weights and completion saved')
- goto('swimming','SWIMMING.')
+ goto('swimming','Swimming')
  page.locator('.library-card').filter(has=page.get_by_role('heading',name='Aerobic endurance',exact=True)).get_by_role('button',name='Explore session').click()
  expect(page.get_by_role('dialog').get_by_text('2,400 m',exact=True)).to_be_visible()
  page.get_by_role('dialog').get_by_role('button',name='Edit',exact=True).click()
@@ -72,7 +73,7 @@ with sync_playwright() as p:
  page.get_by_role('dialog').get_by_role('button',name='Add to calendar',exact=True).click()
  assert any(w['title']=='My 2400 swim' and sum(s['distance']*s['reps'] for s in w['steps'])==2400 for w in database()['workouts'].values())
  report('Swimming workout builder retains accurate total distance')
- goto('cycling','CYCLING.')
+ goto('cycling','Cycling')
  page.locator('.library-card').filter(has=page.get_by_role('heading',name='Sweet spot intervals',exact=True)).get_by_role('button',name='Explore session').click()
  dlg=page.get_by_role('dialog');dlg.get_by_role('button',name='Edit',exact=True).click()
  dlg.get_by_label('Workout title',exact=True).fill('My power session')
@@ -80,19 +81,19 @@ with sync_playwright() as p:
  dlg.get_by_role('button',name='Add to calendar',exact=True).click()
  assert any(w['title']=='My power session' and w['steps'][1]['target']=='90% FTP · 216 W' for w in database()['workouts'].values())
  report('Cycling builder saves power targets')
- goto('nutrition','ENERGY WITH INTENT.')
+ goto('nutrition','Fueling & nutrition')
  page.get_by_label('Plan name',exact=True).fill('Long ride fuel')
  db=database();ride=next(s for s in db['sessions'].values() if s['status']=='planned' and db['workouts'][s['workoutId']]['sport']=='Cycling')
  page.get_by_label('Attach to a workout',exact=True).select_option(ride['id'])
  page.get_by_role('button',name='Save fueling plan',exact=True).click()
  assert any(f['name']=='Long ride fuel' and f['sessionId']==ride['id'] for f in database()['fueling'].values())
  report('Fueling plan saved and linked to a ride')
- goto('recovery','REST WITH PURPOSE.')
+ goto('recovery','Recovery check-in')
  page.get_by_role('button',name='fatigue 4 out of 5',exact=True).click()
  page.get_by_role('button',name='Save daily check-in',exact=True).click()
  assert any(c['fatigue']==4 for c in database()['recovery'].values())
  report('Subjective recovery check-in saved')
- goto('coach','YOUR NEXT MOVE.')
+ goto('coach','Training decision center')
  page.get_by_role('button',name='Adjust my week because I’m feeling fatigued.',exact=False).click()
  page.get_by_role('button',name='Accept change',exact=True).click()
  rec=list(database()['recommendations'].values())[-1]
@@ -100,7 +101,7 @@ with sync_playwright() as p:
  page.get_by_role('button',name='Undo adjustment',exact=True).click()
  assert database()['sessions'][rec['sessionId']]['workoutId']==rec['before']['workoutId']
  report('Data-grounded coach recommendation accepted and undone')
- goto('integrations','CONNECTED BY INTENT.')
+ goto('integrations','Integrations')
  page.get_by_role('button',name='Strava',exact=True).click()
  page.get_by_role('button',name='Demo Import',exact=True).click()
  count=len(database()['activities'])
@@ -115,15 +116,15 @@ with sync_playwright() as p:
  assert data['format']=='AERON structured workout JSON' and data['workout']['steps']
  expect(page.get_by_role('heading',name='Manual transfer guide',exact=True)).to_be_visible()
  report('Garmin JSON download contains real structured steps and manual guide')
- page.reload();expect(page.get_by_role('heading',name='CONNECTED BY INTENT.',exact=True)).to_be_visible()
+ page.reload();expect(page.get_by_role('heading',name='Integrations',exact=True)).to_be_visible()
  assert database()['athlete']['name']=='Jordan'
  report('Reload retains profile and training changes')
- goto('settings','YOUR SYSTEM. YOUR RULES.')
+ goto('settings','Settings')
  page.get_by_role('button',name='Accessibility',exact=True).click()
  page.get_by_role('switch').check()
  assert database()['athlete']['preferences']['reducedMotion']
  assert page.evaluate('document.documentElement.dataset.reduced')=='true'
- for route,title in [('','EVERY SESSIONCOUNTS.'),('calendar','TRAINING CALENDAR.'),('plans','PROGRESS IS A PROCESS.'),('analytics','PROOF OF THE PROCESS.')]:
+ for route,title in [('','EVERY SESSIONCOUNTS.'),('calendar','Training calendar'),('plans','Training plan'),('analytics','Performance analytics')]:
   page.goto(BASE+'/#/'+route,wait_until='domcontentloaded')
   page.locator('h1').wait_for()
   assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'),route

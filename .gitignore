@@ -7,3 +7,6 @@ dist/
 *-preview.png
 playwright-report/
 test-results/
+
+public/third-party-notices.txt
+public/license.txt

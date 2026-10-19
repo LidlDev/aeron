@@ -23,6 +23,10 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Lint and type check
+        run: |
+          npm run lint
+          npm run typecheck
       - name: Test training workflows
         run: npm test
       - name: Build application
@@ -42,6 +46,7 @@ jobs:
         run: |
           python -m http.server 3001 --bind 127.0.0.1 --directory dist > /tmp/aeron-preview.log 2>&1 &
           python scripts/browser-smoke.py
+          python scripts/v2-journeys.py
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload production build

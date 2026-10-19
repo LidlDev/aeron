@@ -1,54 +1,68 @@
-# AERON — Train with intent.
+# AERON V2 — Train with intent.
 
-A React + TypeScript endurance training prototype. Demo mode works without an account, API key, or backend. All user data stays in the current browser's localStorage.
+**[Open AERON](https://lidldev.github.io/aeron/)** · [Deployment workflow](https://github.com/LidlDev/aeron/actions)
+
+A browser-local endurance training platform for triathletes. React, TypeScript, Vite, Tailwind, Radix/shadcn-style primitives, React Three Fiber/Drei, Framer Motion, Recharts and Lucide. Demo mode works without accounts or API keys.
 
 ## Run locally
 
-Requires Node.js 22 or newer.
+Requires Node 22.13+.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. The dev server listens on all interfaces. On a phone on the same network as your computer, use your computer's LAN IP with port 3000. A remote workspace needs port forwarding; your phone's localhost does not point to that workspace.
+Open http://localhost:3000. For a phone on your computer’s network, use that computer’s LAN IP and port 3000. A remote workspace requires port forwarding; the GitHub Pages URL works directly on mobile.
 
-## GitHub Pages
+## What changed in V2
 
-The included `.github/workflows/pages.yml` runs domain and mobile browser tests, checks TypeScript, builds Vite, and deploys `dist` using GitHub Pages. Set **Settings → Pages → Source → GitHub Actions**. Every push to `main` rebuilds and redeploys. Relative asset URLs and hash routing support repository subpaths.
+- Training-first compact dashboard and horizontal mobile calendar with contextual session actions.
+- 1,330 searchable exercises: 1,316 normalized OpenGym-derived text records, including 16 aliases preserving original AERON IDs, plus 14 AERON-only records. Images are deliberately excluded by separate media licensing.
+- Ordered strength builder, saved templates, working/warm-up sets, reps/load/RPE/RIR, timed holds, supersets, substitutions, deadline rest timer, previous performance and bounded estimated records.
+- One canonical calendar lifecycle for strength and endurance, with history-safe migration and plan regeneration.
+- Sport-specific profiles, swim pool validation and explicitly logged swim set progress.
+- Sport-specific analytics and evidence-led Demo Coach with validated approvals and reversible revisions.
 
-## Features
+## Data and integrations
 
-- Dashboard, weekly/monthly calendar, drag-and-drop rescheduling and mobile move controls
-- Eleven-step onboarding, conservative four-week planning, preserved completed history
-- 60 structured workout records, 30 detailed exercise records, interval editor and workout timer
-- Running, cycling, swimming studios and strength set logging
-- Configurable fueling plans, nutrition journal, recovery check-ins
-- Twelve-week seeded history and responsive Recharts analytics
-- Rule-based Demo Coach with review, accept, reject and undo
-- Garmin structured JSON export and manual setup guide; deduplicated Strava demo import
-- Editable SVG brand assets, procedural R3F scenes, reduced motion and WebGL fallbacks
-- Validated versioned data import/export, reset, settings and error boundaries
+V1 browser data migrates to schema V2 with an untouched original and backup. Invalid data cannot be silently overwritten. Settings → Data provides validated backup import/export and explicit reset/recovery. Entered data remains in this browser and is not pushed to GitHub. Pages, localhost and different devices use separate storage.
 
-## Data and integration boundaries
+All demonstration history is fictional. Strava import is **Demo Import**, not OAuth. Garmin export is structured **AERON JSON**, not a FIT file or verified synchronization. The coach uses deterministic rules. No frontend API secrets are used. Real integrations need secure server-side adapters.
 
-All demonstration history is fictional. Garmin and Strava do not connect to real accounts. JSON exports are AERON definitions, **not Garmin FIT files**. The Demo Coach is deterministic software, not a connected generative AI model. The `CoachAdapter` interface is intended for a future authenticated server endpoint. Never add private tokens or API keys to frontend code.
-
-Data is browser-local: Pages and localhost have separate storage, as do different phones and computers. Use Settings → Data to export/import a backup between them. Clearing browser data removes local records. A public Pages URL serves application code and fictional seed data; locally entered training data is not pushed to GitHub.
-
-Nutrition ranges are educational and configurable. Recovery scales are subjective check-ins, not a medical score.
-
-## Verification
+## Verification and deployment
 
 ```sh
+npm run lint
+npm run typecheck
 npm test
 npm run build
 ```
 
-The automated domain tests cover library completeness, plan volume safety, history preservation, accurate intervals and swim distance, completion, coach acceptance/undo, Strava deduplication, and backup validation.
+Optional browser tests require Python Playwright and Chromium. Serve `dist` on port 3001, then run:
 
-The optional `scripts/browser-smoke.py` uses Python Playwright and Chromium. The GitHub workflow installs these and runs the complete mobile acceptance path against the production build before deploying.
+```sh
+AERON_URL=http://localhost:3001 python scripts/browser-smoke.py
+AERON_URL=http://localhost:3001 python scripts/v2-journeys.py
+```
 
-## Stack
+`CHROMIUM_PATH` selects a system browser; set it to an empty string to use Playwright’s installed Chromium. GitHub Actions installs the tools and runs both browser suites before deploying `main` to Pages. Keep Pages → Source set to GitHub Actions.
 
-React 19, TypeScript, Vite, Tailwind CSS 4, shadcn-style Button with Radix Slot and CVA, Radix accessible dialogs, React Three Fiber, Drei, Three.js, Framer Motion, Recharts, Lucide, Vitest.
+## Documentation
+
+- [Architecture and storage migration](docs/AERON_V2_ARCHITECTURE.md)
+- [OpenGym sources, adaptations and licensing](docs/OPENGYM_INTEGRATION.md)
+- [Design system and mobile behavior](docs/DESIGN_SYSTEM.md)
+- [Feature verification and remaining limitations](docs/FEATURE_VERIFICATION.md)
+
+## Source and licensing
+
+AERON V2 includes selective OpenGym code adaptations, copyright (C) 2026 Duarte Santos, under **AGPL-3.0-or-later**. Corresponding application source is this repository; see [LICENSE](LICENSE). Retain attribution and offer corresponding source for modified network deployments as required by the applicable license.
+
+Exercise metadata/instruction text originates from Hasan Emir Yıldırım’s exercises-dataset under MIT with an explicit media exception. No Gym Visual images or animations are included. See `vendor/opengym/`, the integration document, and per-module attribution. Fonts retain OFL notices. Builds produce [third-party notices](https://lidldev.github.io/aeron/third-party-notices.txt) and [license text](https://lidldev.github.io/aeron/license.txt).
+
+To reproduce the text catalogue import from the separately checked-out audited OpenGym revision:
+
+```sh
+node scripts/import-opengym.mjs /path/to/opengym-reference
+```
