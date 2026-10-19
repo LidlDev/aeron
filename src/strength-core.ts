@@ -97,13 +97,29 @@ export function exerciseHistory(db: Database, exerciseId: string) {
       const sets = l.sets.filter(
         (s) => s.exerciseId === exerciseId && s.done && s.kind !== "warmup",
       );
+      const top = [...sets].sort(
+        (a, b) =>
+          b.weight - a.weight ||
+          (b.mode === "time"
+            ? (b.seconds || 0) - (a.seconds || 0)
+            : b.reps - a.reps),
+      )[0];
       return {
         id: l.id,
         date: l.date,
         sets,
+        record: top
+          ? top.mode === "time"
+            ? `${top.seconds || 0}s @ ${top.weight}kg`
+            : `${top.weight}kg × ${top.reps}`
+          : "No working sets",
+        maxReps: Math.max(
+          0,
+          ...sets.filter((s) => s.mode !== "time").map((s) => s.reps),
+        ),
         volume: sets.reduce((n, s) => n + setVolume(s), 0),
-        weight: Math.max(0, ...sets.map((s) => s.weight)),
-        reps: Math.max(0, ...sets.map((s) => s.reps)),
+        weight: top?.weight || 0,
+        reps: top?.mode === "time" ? 0 : top?.reps || 0,
         estimated1RM: Math.max(
           0,
           ...sets

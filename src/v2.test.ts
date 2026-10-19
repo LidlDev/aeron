@@ -414,3 +414,29 @@ describe("Canonical strength history deletion guard", () => {
     expect(Object.keys(db.activities)).toHaveLength(count);
   });
 });
+
+describe("Strength record provenance", () => {
+  it("shows load and reps from the same actual set rather than combining independent maxima", () => {
+    const started = startStrength(seed(), "A");
+    let db = started.db;
+    const log = db.strengthLogs[started.logId];
+    const sets = log.sets.filter(
+      (s) => s.exerciseId === "ex-2" && s.kind === "working",
+    );
+    db = updateStrengthSet(db, log.id, sets[0].id, {
+      weight: 40,
+      reps: 6,
+      done: true,
+    });
+    db = updateStrengthSet(db, log.id, sets[1].id, {
+      weight: 20,
+      reps: 20,
+      done: true,
+    });
+    db = finishStrength(db, log.id);
+    const record = exerciseHistory(db, "ex-2").at(-1)!;
+    expect(record.record).toBe("40kg × 6");
+    expect(record.maxReps).toBe(20);
+    expect(record.estimated1RM).toBe(48);
+  });
+});

@@ -339,9 +339,7 @@ export function Analytics() {
                     .map((h) => (
                       <div key={h.id}>
                         <span>{h.date}</span>
-                        <strong>
-                          {h.weight}kg × {h.reps}
-                        </strong>
+                        <strong>{h.record}</strong>
                         <span>
                           {h.estimated1RM
                             ? h.estimated1RM + "kg est. 1RM"

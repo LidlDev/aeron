@@ -60,7 +60,7 @@ export function ExerciseDrawer({
   const { db } = useApp();
   const history = exerciseHistory(db, exercise.id);
   const bestWeight = Math.max(0, ...history.map((h) => h.weight));
-  const bestReps = Math.max(0, ...history.map((h) => h.reps));
+  const bestReps = Math.max(0, ...history.map((h) => h.maxReps));
   const bestEstimate = Math.max(0, ...history.map((h) => h.estimated1RM));
   return (
     <Modal
@@ -164,9 +164,7 @@ export function ExerciseDrawer({
                     .map((h) => (
                       <div key={h.id}>
                         <span>{dateLabel(h.date)}</span>
-                        <strong>
-                          {h.weight}kg × {h.reps}
-                        </strong>
+                        <strong>{h.record}</strong>
                         <span>{h.volume.toFixed(0)} kg·reps</span>
                       </div>
                     ))}
@@ -508,7 +506,7 @@ export function Strength() {
                 <p className="previous-performance">
                   Previous session:{" "}
                   {previous
-                    ? `${previous.date} · ${previous.weight}kg × ${previous.reps} · ${previous.volume} kg·reps`
+                    ? `${previous.date} · ${previous.record} · ${previous.volume} kg·reps`
                     : "No recorded performance yet"}
                 </p>
                 {currentSets[0]?.superset && (

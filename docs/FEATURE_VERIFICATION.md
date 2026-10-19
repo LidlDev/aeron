@@ -16,7 +16,7 @@ Commands executed against the working checkout:
 |---|---|
 | `npm run lint` | Passed, zero warnings/errors |
 | `npm run typecheck` | Passed |
-| `npm test` | 25 tests across domain and V2 regression suites |
+| `npm test` | 26 tests across domain and V2 regression suites |
 | `npm run build` | Passed, static production artifact in `dist/` |
 | `python scripts/browser-smoke.py` | Passed against built app, 390 × 844 |
 | `python scripts/v2-journeys.py` | Passed against built app, 390 × 844 and 1440 × 1000 |
