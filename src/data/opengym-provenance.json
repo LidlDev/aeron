@@ -1,0 +1,27 @@
+{
+  "upstreamCommit": "678bf5bf10446e8997a77d43e89c9b2721d8d0fc",
+  "datasetCommit": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+  "sourceRecords": 1324,
+  "importedRecords": 1316,
+  "deduplicated": 8,
+  "existingAliases": {
+    "ex-1": "0042",
+    "ex-2": "1760",
+    "ex-3": "0085",
+    "ex-4": "0811",
+    "ex-7": "0431",
+    "ex-9": "1757",
+    "ex-10": "0417",
+    "ex-11": "1379",
+    "ex-12": "0025",
+    "ex-14": "0293",
+    "ex-16": "2330",
+    "ex-17": "0426",
+    "ex-18": "0979",
+    "ex-19": "0276",
+    "ex-21": "2133",
+    "ex-23": "3013"
+  },
+  "mediaImported": 0,
+  "license": "MIT (data text); AGPL-3.0-or-later (adapted application code)"
+}
