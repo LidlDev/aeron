@@ -287,7 +287,7 @@ export function Strength() {
       ...next.strengthLogs[log.id],
       workSetId: undefined,
       workEndsAt: undefined,
-      restEndsAt: Date.now() + (set.restSeconds || 90) * 1000,
+      restEndsAt: Date.now() + (set.restSeconds ?? 90) * 1000,
     };
     setDb(next);
   }
@@ -583,7 +583,7 @@ export function Strength() {
                             done: !s.done,
                           });
                           next.strengthLogs[log.id].restEndsAt = !s.done
-                            ? Date.now() + (s.restSeconds || 90) * 1000
+                            ? Date.now() + (s.restSeconds ?? 90) * 1000
                             : undefined;
                           setDb(next);
                         }}
@@ -595,7 +595,7 @@ export function Strength() {
                       <summary>
                         Set options · {s.kind || "working"}
                         {s.rir != null ? ` · ${s.rir} RIR` : ""} ·{" "}
-                        {s.restSeconds || 90}s rest
+                        {s.restSeconds ?? 90}s rest
                       </summary>
                       <div className="form-grid">
                         <Field label={`Set ${i + 1} type`}>

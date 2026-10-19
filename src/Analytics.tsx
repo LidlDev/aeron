@@ -267,7 +267,7 @@ export function Analytics() {
             <ChartPanel
               title="Session load"
               unit=" AU"
-              context="Duration × recorded RPE. A descriptive workload measure, not an injury or medical prediction."
+              context="Duration × RPE (quick completions default to RPE 4). A descriptive workload measure, not an injury or medical prediction."
               data={summary.activities
                 .sort((a, b) => a.date.localeCompare(b.date))
                 .map((a) => ({

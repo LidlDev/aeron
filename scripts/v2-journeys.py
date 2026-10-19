@@ -33,7 +33,7 @@ with sync_playwright() as p:
  dlg.get_by_label('Working sets · exercise 1',exact=True).fill('2')
  dlg.get_by_label('Target reps · exercise 1',exact=True).fill('10')
  dlg.get_by_label('Load (kg) · exercise 1',exact=True).fill('15')
- dlg.get_by_label('Rest seconds · exercise 1',exact=True).fill('45')
+ dlg.get_by_label('Rest seconds · exercise 1',exact=True).fill('0')
  dlg.get_by_role('button',name='Save strength workout',exact=True).click()
  page.get_by_role('button',name='Training',exact=True).click()
  page.get_by_role('button',name='Start Strength Endurance test',exact=True).click()
@@ -41,6 +41,7 @@ with sync_playwright() as p:
  page.get_by_label('3/4 sit-up set 2 reps',exact=True).fill('12')
  page.get_by_label('3/4 sit-up set 2 weight in kg',exact=True).fill('20')
  page.get_by_role('button',name='Complete 3/4 sit-up set 2',exact=True).click()
+ assert db()['strengthLogs'][log['id']]['restEndsAt'] <= page.evaluate('Date.now()')+100
  page.get_by_role('button',name='Pause session',exact=True).click()
  page.reload();expect(page.get_by_role('button',name='Resume session',exact=True)).to_be_visible()
  assert db()['strengthLogs'][log['id']]['sets'][1]['weight']==20
