@@ -98,6 +98,7 @@ export interface Workout {
   strengthTemplateId?: string;
 }
 export interface PlannedSession {
+  archived?: boolean;
   origin?: "plan" | "manual" | "import";
   coachProtected?: boolean;
   id: string;
@@ -1245,14 +1246,17 @@ export function applyPlan(
       (s) =>
         s.date >= generated.plan.start &&
         s.status === "planned" &&
-        !s.coachProtected,
+        !s.coachProtected &&
+        !Object.values(db.strengthLogs).some((l) => l.sessionId === s.id),
     )
     .forEach((s) => delete sessions[s.id]);
   generated.workouts.forEach((w) => (workouts[w.id] = w));
   generated.sessions.forEach((s) => {
     const alreadyCompleted = Object.values(sessions).some(
       (old) =>
-        (old.status === "completed" || old.coachProtected) &&
+        (old.status === "completed" ||
+          old.coachProtected ||
+          Object.values(db.strengthLogs).some((l) => l.sessionId === old.id)) &&
         old.date === s.date &&
         db.workouts[old.workoutId]?.sport === workouts[s.workoutId]?.sport,
     );
@@ -1310,7 +1314,7 @@ export function importActivity(
         date: activity.date,
         workoutId: activity.workoutId,
         status: "completed" as const,
-        origin:'import' as const,
+        origin: "import" as const,
         notes: "Imported activity; no matching planned session.",
       };
   return {
@@ -1364,7 +1368,7 @@ export function coachReply(
     b.date.localeCompare(a.date),
   )[0];
   const upcoming = Object.values(db.sessions)
-    .filter((s) => s.date >= today() && s.status === "planned")
+    .filter((s) => !s.archived && s.date >= today() && s.status === "planned")
     .sort((a, b) => a.date.localeCompare(b.date));
   const total = Object.values(db.activities)
     .filter((a) => a.date >= addDays(today(), -28))
@@ -1448,7 +1452,8 @@ export function decideRecommendation(
   if (!r) return db;
   if (
     (action === "accepted" && r.status !== "pending") ||
-    (action === "undone" && r.status !== "accepted") || (action==='rejected'&&r.status!=='pending')
+    (action === "undone" && r.status !== "accepted") ||
+    (action === "rejected" && r.status !== "pending")
   )
     return db;
   const current = db.sessions[r.sessionId];
@@ -1480,14 +1485,20 @@ export function decideRecommendation(
     );
   if (
     action === "accepted" &&
-    (current.workoutId !== r.before.workoutId || current.date !== r.before.date || current.status!==r.before.status || current.notes!==r.before.notes)
+    (current.workoutId !== r.before.workoutId ||
+      current.date !== r.before.date ||
+      current.status !== r.before.status ||
+      current.notes !== r.before.notes)
   )
     throw new Error(
       "This proposal is stale. The session changed after it was proposed. Request a new recommendation.",
     );
   if (
     action === "undone" &&
-    (current.workoutId !== r.after.workoutId || current.date !== r.after.date || current.status!==r.after.status || current.notes!==r.after.notes)
+    (current.workoutId !== r.after.workoutId ||
+      current.date !== r.after.date ||
+      current.status !== r.after.status ||
+      current.notes !== r.after.notes)
   )
     throw new Error(
       "The session has changed since this recommendation. Edit it in the calendar.",

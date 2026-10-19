@@ -1,113 +1,134 @@
-import { useState, lazy, Suspense, useRef, useEffect } from "react";
-import {
-  Send,
-  Sparkles,
-  ArrowRight,
-  Check,
-  X,
-  RotateCcw,
-  Download,
-  Upload,
-  Watch,
-  Link,
-  FileJson,
-  Activity,
-  ShieldCheck,
-  AlertCircle,
-  ExternalLink,
-} from "lucide-react";
+import { useState, lazy, Suspense } from "react";
 import {
   useApp,
   PageTitle,
   Card,
   SectionTitle,
-  Button,
   Field,
-  Badge,
-  Stat,
   Empty,
   AeronScene,
-  dateLabel,
 } from "./ui";
 import {
   today,
   addDays,
   monday,
-  duration,
   hours,
+  duration,
   colors,
   sports,
   weeklyData,
-  coachReply,
-  decideRecommendation,
-  demoImport,
-  download,
-  uid,
-  type CoachMessage,
   type Sport,
 } from "./domain";
-const VolumeChart = lazy(() =>
-  import("./Charts").then((m) => ({ default: m.VolumeChart })),
-);
+import { trainingSummary, sportProgress, latestCheckin } from "./metrics";
+import { exerciseHistory } from "./strength-core";
+import { timeInZone } from "./workout-math";
 const TrendChart = lazy(() =>
   import("./Charts").then((m) => ({ default: m.TrendChart })),
 );
-const DistributionChart = lazy(() =>
-  import("./Charts").then((m) => ({ default: m.DistributionChart })),
+const VolumeChart = lazy(() =>
+  import("./Charts").then((m) => ({ default: m.VolumeChart })),
 );
+const HoursChart = lazy(() =>
+  import("./Charts").then((m) => ({ default: m.HoursComparisonChart })),
+);
+function ChartPanel({
+  title,
+  unit,
+  context,
+  data,
+  keys,
+  color,
+}: {
+  title: string;
+  unit: string;
+  context: string;
+  data: Record<string, number | string>[];
+  keys: string[];
+  color?: string;
+}) {
+  return (
+    <Card>
+      <SectionTitle title={title} meta={unit} />
+      <p className="chart-context">{context}</p>
+      {data.length ? (
+        <Suspense fallback={<p>Loading chart…</p>}>
+          <TrendChart data={data} keys={keys} color={color} unit={unit} />
+        </Suspense>
+      ) : (
+        <Empty
+          title="No recorded data in this range"
+          description="This metric appears when the relevant activity or set values have been recorded."
+        />
+      )}
+    </Card>
+  );
+}
 export function Analytics() {
   const { db } = useApp();
+  const [tab, setTab] = useState("Overview");
   const [range, setRange] = useState("90 days");
   const [customStart, setCustomStart] = useState(addDays(today(), -30));
   const [customEnd, setCustomEnd] = useState(today());
+  const [exId, setExId] = useState("ex-2");
+  const [terrain, setTerrain] = useState(false);
   const from =
     range === "Custom"
       ? customStart
       : addDays(
           today(),
           range === "7 days"
-            ? -7
+            ? -6
             : range === "30 days"
-              ? -30
+              ? -29
               : range === "90 days"
-                ? -90
-                : -365,
+                ? -89
+                : -364,
         );
   const to = range === "Custom" ? customEnd : today();
-  const activities = Object.values(db.activities).filter(
-    (a) => a.date >= from && a.date <= to,
+  const summary = trainingSummary(db, from, to);
+  const context = `${from} → ${to}`;
+  const weeks = Array.from(
+    {
+      length: Math.min(
+        53,
+        Math.ceil(
+          (new Date(to + "T12:00:00").getTime() -
+            new Date(from + "T12:00:00").getTime()) /
+            604800000,
+        ) + 1,
+      ),
+    },
+    (_, i) => addDays(monday(from), i * 7),
+  )
+    .filter((date) => date <= to)
+    .map((date) => {
+      const s = trainingSummary(db, date, addDays(date, 6));
+      return {
+        date,
+        Planned: Math.round(s.plannedMinutes / 6) / 10,
+        Completed: Math.round(s.completedMinutes / 6) / 10,
+      };
+    });
+  const check = latestCheckin(db);
+  const logs = Object.values(db.strengthLogs).filter(
+    (l) => l.completed && l.date >= from && l.date <= to,
   );
-  const sessions = Object.values(db.sessions).filter(
-    (s) => s.date >= from && s.date <= to,
-  );
-  const mins = activities.reduce((n, a) => n + a.minutes, 0);
-  const data = weeklyData(
-    db,
-    range === "7 days"
-      ? 2
-      : range === "30 days"
-        ? 5
-        : range === "12 months"
-          ? 52
-          : 12,
-  ).filter((d) => String(d.date) <= to && addDays(String(d.date), 7) >= from);
-  const planned = sessions.filter((s) => s.date <= today()).length;
-  const completed = sessions.filter((s) => s.status === "completed").length;
-  const distribution = sports.map((sp) => ({
-    name: sp,
-    value: activities
-      .filter((a) => db.workouts[a.workoutId].sport === sp)
-      .reduce((n, a) => n + a.minutes, 0),
-  }));
-  const terrain = weeklyData(db).map((d) =>
-    sports.reduce((n, sp) => n + Number(d[sp]), 0),
+  const exercisesWithHistory = [
+    ...new Set(
+      logs.flatMap((l) =>
+        l.sets.filter((s) => s.done).map((s) => s.exerciseId),
+      ),
+    ),
+  ];
+  const history = exerciseHistory(db, exId).filter(
+    (h) => h.date >= from && h.date <= to,
   );
   return (
     <>
       <PageTitle
-        eyebrow="SEE THE BIGGER PICTURE"
-        title="PROOF OF THE PROCESS."
-        description="Every effort leaves a signal. Understand yours."
+        eyebrow="ANALYTICS / RECORDED TRAINING"
+        title="Performance analytics"
+        description="Training volume, sport progression and recorded strength performance."
         action={
           <select
             aria-label="Analytics date range"
@@ -141,226 +162,503 @@ export function Analytics() {
           </Field>
         </div>
       )}
-      <div className="stats-grid">
-        <Stat
-          label="TIME IN MOTION"
-          value={(mins / 60).toFixed(1)}
-          unit="h"
-          sub="Completed training"
-          accent
-        />
-        <Stat
-          label="SESSIONS COMPLETED"
-          value={activities.length}
-          sub="All disciplines"
-        />
-        <Stat
-          label="PLAN ADHERENCE"
-          value={planned ? Math.round((completed / planned) * 100) : 0}
-          unit="%"
-          sub={`${completed} of ${planned} scheduled sessions`}
-        />
-        <Stat
-          label="SESSION LOAD"
-          value={Math.round(
-            activities.reduce((n, a) => n + a.minutes * a.rpe, 0),
-          )}
-          unit="AU"
-          sub="Duration × subjective RPE"
-        />
+      <div className="compact-metrics analytics-summary">
+        <div>
+          <span>COMPLETED / PLANNED</span>
+          <strong>
+            {(summary.completedMinutes / 60).toFixed(1)}
+            <small> / {(summary.plannedMinutes / 60).toFixed(1)} h</small>
+          </strong>
+        </div>
+        <div>
+          <span>ADHERENCE</span>
+          <strong>
+            {summary.adherence == null ? "—" : summary.adherence + "%"}
+            <small>
+              {" "}
+              {summary.done}/{summary.due}
+            </small>
+          </strong>
+        </div>
+        <div>
+          <span>SESSIONS</span>
+          <strong>{summary.completedSessions}</strong>
+        </div>
+        <div>
+          <span>SESSION LOAD</span>
+          <strong>
+            {Math.round(summary.load)}
+            <small> min × RPE</small>
+          </strong>
+        </div>
       </div>
-      {!activities.length && (
-        <Empty
-          title="A fresh perspective starts with a session"
-          description="Complete a workout or choose a wider date range to see your training data."
-        />
-      )}
-      <div className="analytics-grid">
-        <Card className="analytics-volume">
-          <SectionTitle
-            title="The endurance engine"
-            meta="WEEKLY TRAINING HOURS"
-          />
-          <Suspense>
-            <VolumeChart data={data} />
-          </Suspense>
-          <div className="chart-legend">
-            {sports.map((s) => (
-              <span key={s}>
-                <i style={{ background: colors[s] }} />
-                {s}
-              </span>
-            ))}
-          </div>
-        </Card>
-        <Card>
-          <SectionTitle title="Discipline balance" meta="COMPLETED VOLUME" />
-          <div className="donut-wrap">
-            <Suspense>
-              <DistributionChart data={distribution} />
-            </Suspense>
-            <div className="donut-center">
-              <strong>{(mins / 60).toFixed(1)}</strong>
-              <span>TOTAL HOURS</span>
-            </div>
-          </div>
-          <div className="distribution-list">
-            {distribution.map((d) => (
-              <div key={d.name}>
-                <span>
-                  <i style={{ background: colors[d.name as Sport] }} />
-                  {d.name}
-                </span>
-                <strong>{hours(d.value)}</strong>
-              </div>
-            ))}
-          </div>
-        </Card>
+      <div className="segmented analytics-tabs page-tabs">
+        {["Overview", ...sports].map((s) => (
+          <button
+            key={s}
+            className={tab === s ? "active" : ""}
+            onClick={() => setTab(s)}
+          >
+            {s}
+          </button>
+        ))}
       </div>
-      <div className="two-col">
-        {(["Running", "Cycling", "Swimming"] as Sport[]).map((sport) => {
-          const rows = activities
-            .filter(
-              (a) =>
-                db.workouts[a.workoutId].sport === sport &&
-                (sport === "Cycling" ? a.power : a.pace),
-            )
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .map((a) => ({
-              date: a.date.slice(5),
-              [sport === "Cycling" ? "Average power" : "Pace"]:
-                sport === "Cycling" ? a.power! : Math.round(a.pace! / 6) / 10,
-            }));
-          return (
-            <Card key={sport}>
+      <p className="analytics-date-context">
+        {context} · Demo history is fictional. Manual completions may use
+        workout distance estimates.
+      </p>
+      {tab === "Overview" ? (
+        <>
+          <div className="two-col">
+            <Card>
               <SectionTitle
-                title={`${sport} ${sport === "Cycling" ? "power" : "pace"}`}
-                meta={
-                  sport === "Cycling"
-                    ? "WATTS"
-                    : sport === "Running"
-                      ? "MIN/KM"
-                      : "MIN/100M"
-                }
+                title="Planned vs completed volume"
+                meta="HOURS / WEEK"
               />
-              {rows.length ? (
-                <Suspense>
-                  <TrendChart
-                    data={rows}
-                    keys={[sport === "Cycling" ? "Average power" : "Pace"]}
-                    color={colors[sport]}
-                    unit={sport === "Cycling" ? " W" : " min"}
-                  />
-                </Suspense>
-              ) : (
-                <Empty
-                  title="More sessions, more insight"
-                  description="This chart needs activities with recorded pace or power. Manual completions do not invent these metrics."
-                />
-              )}
+              <Suspense>
+                <HoursChart data={weeks} />
+              </Suspense>
             </Card>
-          );
-        })}
-        <Card>
-          <SectionTitle
-            title="Readiness & training load"
-            meta="SUBJECTIVE CHECK-INS"
-          />
-          <Suspense>
-            <TrendChart
+            <Card>
+              <SectionTitle
+                title="Discipline distribution"
+                meta="COMPLETED / PLANNED"
+              />
+              <div className="analytics-distribution">
+                {summary.distribution.map((d) => (
+                  <div key={d.name}>
+                    <div className="button-row spread">
+                      <span style={{ color: colors[d.name] }}>{d.name}</span>
+                      <strong>
+                        {hours(d.value)} <small>/ {hours(d.planned)}</small>
+                      </strong>
+                    </div>
+                    <div>
+                      <i
+                        style={{
+                          width: `${Math.min(100, (d.value / Math.max(1, summary.completedMinutes)) * 100)}%`,
+                          background: colors[d.name],
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="helper">
+                Completed totals come from activities; planned totals come from
+                calendar definitions, including skipped prescriptions.
+              </p>
+            </Card>
+            <ChartPanel
+              title="Readiness & fatigue"
+              unit=" /5"
+              context={context + " · subjective daily scales"}
               data={Object.values(db.recovery)
                 .filter((r) => r.date >= from && r.date <= to)
                 .sort((a, b) => a.date.localeCompare(b.date))
                 .map((r) => ({
-                  date: r.date.slice(5),
+                  date: r.date,
                   Readiness: r.readiness,
                   Fatigue: r.fatigue,
                 }))}
               keys={["Readiness", "Fatigue"]}
               color="#72D9AF"
-              unit="/5"
             />
-          </Suspense>
-          <p className="helper">
-            Current period load:{" "}
-            {Math.round(activities.reduce((n, a) => n + a.minutes * a.rpe, 0))}{" "}
-            AU. Load is minutes × RPE; wellness is self-reported.
-          </p>
-        </Card>
-        <Card>
-          <SectionTitle
-            title="Strength progression"
-            meta="COMPLETED SESSION VOLUME"
-          />
-          {Object.values(db.strengthLogs).filter(
-            (l) => l.completed && l.date >= from && l.date <= to,
-          ).length ? (
-            <Suspense>
-              <TrendChart
-                data={Object.values(db.strengthLogs)
-                  .filter((l) => l.completed && l.date >= from && l.date <= to)
-                  .map((l) => ({
-                    date: l.date,
-                    Volume: l.sets
-                      .filter((s) => s.done)
-                      .reduce((n, s) => n + s.weight * s.reps, 0),
-                  }))}
-                keys={["Volume"]}
-                color={colors.Strength}
-                unit="kg"
-              />
-            </Suspense>
-          ) : (
-            <Empty
-              title="Build your first data point"
-              description="Log a strength session with weights to see your progression."
+            <ChartPanel
+              title="Session load"
+              unit=" AU"
+              context="Duration × recorded RPE. A descriptive workload measure, not an injury or medical prediction."
+              data={summary.activities
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map((a) => ({
+                  date: a.date,
+                  Load: Math.round(a.minutes * a.rpe),
+                }))}
+              keys={["Load"]}
             />
-          )}
-        </Card>
-        <Card>
-          <SectionTitle
-            title="Planned versus completed"
-            meta="SESSIONS IN PERIOD"
-          />
-          <div className="adherence-bars">
-            {sports.map((sp) => {
-              const ss = sessions.filter(
-                (s) => db.workouts[s.workoutId].sport === sp,
-              );
-              return (
-                <div key={sp}>
-                  <div className="button-row spread">
-                    <span>{sp}</span>
-                    <span className="mono">
-                      {ss.filter((s) => s.status === "completed").length} /{" "}
-                      {ss.length}
-                    </span>
-                  </div>
-                  <progress
-                    style={{ accentColor: colors[sp] }}
-                    max={Math.max(1, ss.length)}
-                    value={ss.filter((s) => s.status === "completed").length}
-                  />
-                </div>
-              );
-            })}
           </div>
-        </Card>
-      </div>
-      <Card className="terrain-card">
-        <div>
-          <SectionTitle
-            title="The shape of your training"
-            meta="12-WEEK VOLUME TERRAIN"
-          />
-          <p>Every rise is a week of work. Every valley makes room to adapt.</p>
-          <p className="helper">
-            Drag to rotate. The two-dimensional volume chart provides the same
-            values.
-          </p>
-        </div>
-        <AeronScene variant="terrain" values={terrain} />
-      </Card>
+          <details
+            className="terrain-details"
+            open={terrain}
+            onToggle={(e) => setTerrain(e.currentTarget.open)}
+          >
+            <summary>
+              Inspect 12-week training terrain{" "}
+              <span>Interactive 3D / rotate</span>
+            </summary>
+            {terrain && (
+              <div className="terrain-content">
+                <AeronScene
+                  variant="terrain"
+                  values={weeklyData(db).map((w) =>
+                    sports.reduce((n, s) => n + Number(w[s]), 0),
+                  )}
+                />
+                <Suspense>
+                  <VolumeChart data={weeklyData(db)} />
+                </Suspense>
+              </div>
+            )}
+          </details>
+        </>
+      ) : tab === "Strength" ? (
+        <>
+          <Field label="Exercise progression">
+            <select value={exId} onChange={(e) => setExId(e.target.value)}>
+              {[...new Set([exId, ...exercisesWithHistory])].map((id) => (
+                <option key={id} value={id}>
+                  {db.exercises[id]?.name || id}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="two-col">
+            <ChartPanel
+              title="Working volume"
+              unit=" kg·reps"
+              context={`${db.exercises[exId]?.name} · completed working rep sets; excludes timed holds and warm-ups`}
+              data={history.map((h) => ({ date: h.date, Volume: h.volume }))}
+              keys={["Volume"]}
+              color={colors.Strength}
+            />
+            <ChartPanel
+              title="Load & rep progression"
+              unit=" kg"
+              context={`${db.exercises[exId]?.name} · best completed load per session; reps are shown below`}
+              data={history.map((h) => ({ date: h.date, Load: h.weight }))}
+              keys={["Load"]}
+              color={colors.Strength}
+            />
+            <Card>
+              <SectionTitle title="Personal records" />
+              <div className="record-table">
+                {history.length ? (
+                  history
+                    .slice(-10)
+                    .reverse()
+                    .map((h) => (
+                      <div key={h.id}>
+                        <span>{h.date}</span>
+                        <strong>
+                          {h.weight}kg × {h.reps}
+                        </strong>
+                        <span>
+                          {h.estimated1RM
+                            ? h.estimated1RM + "kg est. 1RM"
+                            : "No eligible estimate"}
+                        </span>
+                      </div>
+                    ))
+                ) : (
+                  <Empty
+                    title="No recorded sets"
+                    description="Log a strength session to build exercise-specific history."
+                  />
+                )}
+              </div>
+              <p className="helper">
+                1RM is an Epley estimate from loaded sets of 1–12 reps, not a
+                measured lift.
+              </p>
+            </Card>
+            <Card>
+              <SectionTitle
+                title="Movement distribution"
+                meta="COMPLETED WORKING SETS"
+              />
+              <div className="analytics-distribution">
+                {[
+                  ...new Set(
+                    logs.flatMap((l) =>
+                      l.sets.map(
+                        (s) =>
+                          db.exercises[s.exerciseId]?.category || "Unknown",
+                      ),
+                    ),
+                  ),
+                ].map((cat) => {
+                  const sets = logs
+                    .flatMap((l) => l.sets)
+                    .filter(
+                      (s) =>
+                        s.done &&
+                        s.kind !== "warmup" &&
+                        db.exercises[s.exerciseId]?.category === cat,
+                    ).length;
+                  return (
+                    <div className="button-row spread" key={cat}>
+                      <span>{cat}</span>
+                      <strong>{sets} sets</strong>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="helper">
+                {logs.length} completed strength sessions in this range.
+                Adherence uses the same calendar lifecycle as endurance
+                sessions.
+              </p>
+            </Card>
+          </div>
+        </>
+      ) : (
+        <SportAnalytics
+          sport={tab as Sport}
+          db={db}
+          from={from}
+          to={to}
+          context={context}
+        />
+      )}
     </>
+  );
+}
+function SportAnalytics({
+  sport,
+  db,
+  from,
+  to,
+  context,
+}: {
+  sport: Sport;
+  db: ReturnType<typeof useApp>["db"];
+  from: string;
+  to: string;
+  context: string;
+}) {
+  const rows = sportProgress(db, sport, from, to);
+  const unit = sport === "Swimming" ? " min/100m" : " min/km";
+  const pace = rows
+    .filter((r) => r.Pace != null)
+    .map((r) => ({ date: r.date, Pace: r.Pace! }));
+  const power = rows
+    .filter((r) => r.Power != null)
+    .map((r) => ({ date: r.date, Power: r.Power! }));
+  const ss = Object.values(db.sessions).filter(
+    (s) =>
+      s.date >= from &&
+      s.date <= to &&
+      db.workouts[s.workoutId].sport === sport,
+  );
+  const frequency = Array.from(new Set(rows.map((r) => monday(r.date))))
+    .sort()
+    .map((date) => ({
+      date,
+      Sessions: rows.filter((r) => monday(r.date) === date).length,
+    }));
+  const long = rows.filter(
+    (r) => r.Duration >= (sport === "Cycling" ? 90 : 75),
+  );
+  const zoneMinutes = [1, 2, 3, 4, 5].map((zone) => ({
+    zone,
+    minutes: Object.values(db.activities)
+      .filter(
+        (a) =>
+          a.date >= from &&
+          a.date <= to &&
+          db.workouts[a.workoutId].sport === sport,
+      )
+      .reduce((n, a) => {
+        const w = db.workouts[a.workoutId];
+        return (
+          n +
+          ((timeInZone(w).find((z) => z.zone === zone)?.minutes || 0) *
+            a.minutes) /
+            Math.max(1, duration(w))
+        );
+      }, 0),
+  }));
+  return (
+    <div className="two-col">
+      <ChartPanel
+        title={sport === "Cycling" ? "Recorded cycling power" : `${sport} pace`}
+        unit={sport === "Cycling" ? " W" : unit}
+        context={
+          context +
+          " · only recorded pace/power; missing metrics are not estimated"
+        }
+        data={sport === "Cycling" ? power : pace}
+        keys={[sport === "Cycling" ? "Power" : "Pace"]}
+        color={colors[sport]}
+      />
+      <ChartPanel
+        title={`${sport} distance`}
+        unit=" km"
+        context={context}
+        data={rows.map((r) => ({ date: r.date, Distance: r.Distance }))}
+        keys={["Distance"]}
+        color={colors[sport]}
+      />
+      <ChartPanel
+        title={`${sport} duration`}
+        unit=" min"
+        context={context}
+        data={rows.map((r) => ({ date: r.date, Duration: r.Duration }))}
+        keys={["Duration"]}
+        color={colors[sport]}
+      />
+      {sport === "Swimming" ? (
+        <>
+          <ChartPanel
+            title="Swim frequency"
+            unit=" sessions"
+            context="Sessions per calendar week · no inferred pool splits"
+            data={frequency}
+            keys={["Sessions"]}
+            color={colors.Swimming}
+          />
+          <Card>
+            <SectionTitle title="Technique & set completion" />
+            <div className="context-row">
+              <span>Technique session adherence</span>
+              <strong>
+                {
+                  ss.filter(
+                    (s) =>
+                      /technique|drill/i.test(db.workouts[s.workoutId].title) &&
+                      s.status === "completed",
+                  ).length
+                }{" "}
+                /{" "}
+                {
+                  ss.filter((s) =>
+                    /technique|drill/i.test(db.workouts[s.workoutId].title),
+                  ).length
+                }
+              </strong>
+            </div>
+            {(() => {
+              const logged = Object.values(db.activities).filter(
+                (a) =>
+                  a.date >= from &&
+                  a.date <= to &&
+                  db.workouts[a.workoutId].sport === "Swimming" &&
+                  a.stepCompletion,
+              );
+              return logged.length ? (
+                <div className="context-row">
+                  <span>Explicitly recorded set / rep progress</span>
+                  <strong>
+                    {logged.reduce(
+                      (n, a) => n + a.stepCompletion!.completed,
+                      0,
+                    )}{" "}
+                    / {logged.reduce((n, a) => n + a.stepCompletion!.total, 0)}
+                  </strong>
+                </div>
+              ) : null;
+            })()}
+            <p className="helper">
+              Set/rep completion comes only from explicitly logged execution
+              steps. Legacy and manual activity completions do not imply that
+              every set was completed.
+            </p>
+          </Card>
+        </>
+      ) : (
+        <ChartPanel
+          title={
+            sport === "Cycling"
+              ? "Long-ride development"
+              : "Long-run development"
+          }
+          unit=" min"
+          context={
+            sport === "Cycling"
+              ? "Recorded sessions of 90 minutes or longer"
+              : "Recorded sessions of 75 minutes or longer"
+          }
+          data={long.map((r) => ({ date: r.date, Duration: r.Duration }))}
+          keys={["Duration"]}
+          color={colors[sport]}
+        />
+      )}
+      <Card>
+        <SectionTitle
+          title={
+            sport === "Cycling"
+              ? "Time in prescribed power zones"
+              : sport === "Running"
+                ? "Pace at comparable effort"
+                : "Session adherence"
+          }
+        />
+        {sport === "Cycling" ? (
+          <>
+            <div className="analytics-distribution">
+              {zoneMinutes.map((z) => (
+                <div className="button-row spread" key={z.zone}>
+                  <span>Zone {z.zone}</span>
+                  <strong>{z.minutes.toFixed(0)} min</strong>
+                </div>
+              ))}
+            </div>
+            <p className="helper">
+              Derived from completed workout definitions, scaled to recorded
+              duration. This is prescribed zone time, not measured power-trace
+              data.
+            </p>
+            <h3>FTP history</h3>
+            {db.zoneHistory.filter((z) => z.date >= from && z.date <= to)
+              .length ? (
+              db.zoneHistory
+                .filter((z) => z.date >= from && z.date <= to)
+                .map((z, i) => (
+                  <div key={i} className="context-row">
+                    <span>{z.date}</span>
+                    <strong>{z.ftp} W · configured</strong>
+                  </div>
+                ))
+            ) : (
+              <p className="helper">
+                No recorded FTP changes in this range. Current setting:{" "}
+                {db.zones.ftp} W.
+              </p>
+            )}
+          </>
+        ) : sport === "Running" ? (
+          <>
+            <div className="record-table">
+              {[
+                ...new Set(
+                  rows.filter((r) => r.Pace != null).map((r) => r.RPE),
+                ),
+              ]
+                .sort((a, b) => a - b)
+                .map((rpe) => {
+                  const matches = rows.filter(
+                    (r) => r.RPE === rpe && r.Pace != null,
+                  );
+                  return (
+                    <div key={rpe}>
+                      <span>RPE {rpe}</span>
+                      <strong>
+                        {(
+                          matches.reduce((n, r) => n + r.Pace!, 0) /
+                          matches.length
+                        ).toFixed(2)}{" "}
+                        min/km
+                      </strong>
+                      <span>{matches.length} sessions</span>
+                    </div>
+                  );
+                })}
+            </div>
+            <p className="helper">
+              Grouped by recorded RPE. Weather, terrain and conditions are not
+              controlled, so this does not isolate fitness changes.
+            </p>
+          </>
+        ) : (
+          <div className="context-row">
+            <span>Completed sessions</span>
+            <strong>
+              {ss.filter((s) => s.status === "completed").length} / {ss.length}{" "}
+              scheduled
+            </strong>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }

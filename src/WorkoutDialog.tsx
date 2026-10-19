@@ -1,3 +1,5 @@
+import {removeSession} from './session-actions';
+import { validateSwim, expandedSteps } from "./workout-math";
 import { IntervalTimeline } from "./IntervalTimeline";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -11,7 +13,6 @@ import {
   Copy,
   CalendarDays,
   Pencil,
-  Timer,
   ArrowRight,
 } from "lucide-react";
 import { useApp, Modal, Field, Button, Badge, SportIcon, useTimer } from "./ui";
@@ -43,7 +44,7 @@ export default function WorkoutDialog({
   defaultDate?: string;
   onClose: () => void;
 }) {
-  const { db, setDb, toast } = useApp();
+  const { db, setDb, toast, go } = useApp();
   const existing = workoutId ? db.workouts[workoutId] : undefined;
   const session = sessionId ? db.sessions[sessionId] : undefined;
   const [w, setW] = useState<Workout>(() =>
@@ -66,6 +67,7 @@ export default function WorkoutDialog({
           indoor: false,
         },
   );
+  const [rpe, setRpe] = useState(4);
   const [edit, setEdit] = useState(!existing);
   const [date, setDate] = useState(session?.date || defaultDate || today());
   const [status, setStatus] = useState<PlannedSession["status"]>(
@@ -77,43 +79,34 @@ export default function WorkoutDialog({
   const [index, setIndex] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const expanded = w.steps.flatMap((s) =>
-    Array.from({ length: Math.min(s.reps, 100) }, (_, i) => [
-      {
-        ...s,
-        reps: 1,
-        name: s.reps > 1 ? `${s.name} · ${i + 1}/${s.reps}` : s.name,
-      },
-      ...(s.rest > 0 && i < s.reps - 1
-        ? [
-            {
-              ...s,
-              name: "Recovery / rest",
-              minutes: s.rest / 60,
-              reps: 1,
-              zone: 1,
-              target: "Easy recovery",
-              distance: 0,
-            },
-          ]
-        : []),
-    ]).flat(),
-  );
+  const [completedWorkSteps, setCompletedWorkSteps] = useState<number[]>([]);
+  const [lastStepDone, setLastStepDone] = useState(false);
+  const expanded = expandedSteps(w).map((s) => ({ ...s, name: s.label }));
+  function advanceStep(complete: boolean) {
+    if (complete && !expanded[index]?.isRest)
+      setCompletedWorkSteps((ids) =>
+        ids.includes(index) ? ids : [...ids, index],
+      );
+    if (index < expanded.length - 1) {
+      setIndex((i) => i + 1);
+      setSeconds(0);
+    } else {
+      setRunning(false);
+      setLastStepDone(true);
+    }
+  }
   const tick = useCallback(() => setSeconds((s) => s + 1), []);
   useTimer(running, tick);
   useEffect(() => {
     if (
       execution &&
       running &&
+      w.sport !== "Swimming" &&
       expanded[index] &&
       seconds >= expanded[index].minutes * 60
-    ) {
-      if (index < expanded.length - 1) {
-        setIndex((v) => v + 1);
-        setSeconds(0);
-      } else setRunning(false);
-    }
-  }, [seconds, index, execution, running, expanded]);
+    )
+      advanceStep(true);
+  }, [seconds, index, execution, running]);
   const changeStep = (id: string, patch: Partial<WorkoutStep>) =>
     setW((v) => ({
       ...v,
@@ -124,6 +117,7 @@ export default function WorkoutDialog({
       !w.title.trim() ||
       !w.steps.length ||
       !date ||
+      !validateSwim(w) ||
       w.steps.some(
         (s) =>
           !s.name.trim() ||
@@ -136,7 +130,7 @@ export default function WorkoutDialog({
       )
     ) {
       setError(
-        "Add a title, a valid date, and steps with positive duration and repetitions.",
+        "Check the title, date and positive step values. Swim distances must be multiples of the pool length.",
       );
       return;
     }
@@ -188,7 +182,17 @@ export default function WorkoutDialog({
     );
     onClose();
   }
+  function launchStrength() {
+    onClose();
+    go(
+      `/strength?${sessionId ? "session=" + sessionId + "&" : ""}template=${w.strengthTemplateId || "A"}`,
+    );
+  }
   function finish() {
+    if (w.sport === "Strength") {
+      launchStrength();
+      return;
+    }
     const id = sessionId || uid();
     const workout = { ...w, id: uid(), custom: true };
     setDb((d) => {
@@ -207,7 +211,13 @@ export default function WorkoutDialog({
           },
         },
       };
-      return completeSession(next, id);
+      const finished = completeSession(next, id, undefined, rpe);
+      if (execution)
+        finished.activities[`activity-${id}`].stepCompletion = {
+          completed: completedWorkSteps.length,
+          total: expanded.filter((s) => !s.isRest).length,
+        };
+      return finished;
     });
     toast("Session complete. Your training history and analytics are updated.");
     onClose();
@@ -217,6 +227,10 @@ export default function WorkoutDialog({
       format: "AERON structured workout JSON",
       version: 1,
       workout: w,
+      strengthWorkout:
+        w.sport === "Strength"
+          ? db.strengthWorkouts[w.strengthTemplateId || "A"]
+          : undefined,
       totalMinutes: duration(w),
       totalDistanceMeters: distance(w),
       notice:
@@ -279,6 +293,26 @@ export default function WorkoutDialog({
               ).padStart(2, "0")}
             </div>
             <p>{expanded[index]?.target}</p>
+            {w.sport === "Swimming" && (
+              <>
+                <p className="swim-current-distance">
+                  {expanded[index]?.distance
+                    ? `${expanded[index].distance}m`
+                    : "Rest"}{" "}
+                  · {w.poolLength || 25}m pool
+                </p>
+                <Button
+                  disabled={lastStepDone}
+                  onClick={() => advanceStep(true)}
+                >
+                  <Check size={16} />
+                  Complete set & next
+                </Button>
+                <p className="helper">
+                  Estimated pace timer; mark each set/rep when you complete it.
+                </p>
+              </>
+            )}
             <progress max={expanded.length} value={index + 1} />
             <p className="muted">
               Next · {expanded[index + 1]?.name || "Session complete"}
@@ -384,6 +418,19 @@ export default function WorkoutDialog({
                     }
                   />
                 </Field>
+                {w.sport === "Swimming" && (
+                  <Field label="Pool length">
+                    <select
+                      value={w.poolLength || 25}
+                      onChange={(e) =>
+                        setW({ ...w, poolLength: +e.target.value as 25 | 50 })
+                      }
+                    >
+                      <option value="25">25m</option>
+                      <option value="50">50m</option>
+                    </select>
+                  </Field>
+                )}
                 <Field label="Environment">
                   <select
                     value={w.indoor ? "Indoor" : "Outdoor"}
@@ -444,7 +491,7 @@ export default function WorkoutDialog({
             <IntervalTimeline w={w} />
             <div className="section-title">
               <h3>Session structure</h3>
-              {edit && (
+              {edit && w.sport !== "Strength" && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -457,138 +504,162 @@ export default function WorkoutDialog({
                 </Button>
               )}
             </div>
-            <div className="steps">
-              {w.steps.map((s, i) => (
-                <div className="step-row" key={s.id}>
-                  <span
-                    className="step-number"
-                    style={{ color: colors[w.sport] }}
-                  >
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  {edit ? (
-                    <div className="step-editor">
-                      <Field label="Step name">
-                        <input
-                          value={s.name}
-                          onChange={(e) =>
-                            changeStep(s.id, { name: e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Minutes / rep">
-                        <input
-                          type="number"
-                          min=".1"
-                          step=".1"
-                          value={Number(s.minutes.toFixed(2))}
-                          onChange={(e) =>
-                            changeStep(s.id, { minutes: +e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Repetitions">
-                        <input
-                          type="number"
-                          min="1"
-                          max="100"
-                          value={s.reps}
-                          onChange={(e) =>
-                            changeStep(s.id, { reps: +e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Meters / rep">
-                        <input
-                          type="number"
-                          min="0"
-                          step="25"
-                          value={s.distance}
-                          onChange={(e) =>
-                            changeStep(s.id, { distance: +e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Rest (seconds)">
-                        <input
-                          type="number"
-                          min="0"
-                          value={Math.round(s.rest)}
-                          onChange={(e) =>
-                            changeStep(s.id, { rest: +e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Target (pace / power / HR / RPE)">
-                        <input
-                          value={s.target}
-                          onChange={(e) =>
-                            changeStep(s.id, { target: e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Training zone">
-                        <select
-                          value={s.zone}
-                          onChange={(e) =>
-                            changeStep(s.id, { zone: +e.target.value })
-                          }
-                        >
-                          {[1, 2, 3, 4, 5].map((z) => (
-                            <option key={z} value={z}>
-                              Zone {z}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      {w.sport === "Cycling" && (
-                        <Field label="Cadence (rpm)">
+            {w.sport === "Strength" ? (
+              <div className="strength-detail-exercises">
+                <p className="helper">
+                  Exercises, sets and intensity are edited in the dedicated
+                  strength builder.
+                </p>
+                {(
+                  db.strengthWorkouts[w.strengthTemplateId || "A"]?.entries ||
+                  []
+                ).map((e) => (
+                  <div className="preview-session" key={e.id}>
+                    <strong>{db.exercises[e.exerciseId]?.name}</strong>
+                    <span>
+                      {e.sets} × {e.mode === "time" ? `${e.seconds}s` : e.reps}{" "}
+                      · {e.restSeconds}s rest
+                    </span>
+                  </div>
+                ))}
+                <Button variant="outline" onClick={launchStrength}>
+                  Open strength log <ArrowRight size={14} />
+                </Button>
+              </div>
+            ) : (
+              <div className="steps">
+                {w.steps.map((s, i) => (
+                  <div className="step-row" key={s.id}>
+                    <span
+                      className="step-number"
+                      style={{ color: colors[w.sport] }}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    {edit ? (
+                      <div className="step-editor">
+                        <Field label="Step name">
                           <input
-                            type="number"
-                            value={s.cadence || 90}
+                            value={s.name}
                             onChange={(e) =>
-                              changeStep(s.id, { cadence: +e.target.value })
+                              changeStep(s.id, { name: e.target.value })
                             }
                           />
                         </Field>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setW({
-                            ...w,
-                            steps: w.steps.filter((st) => st.id !== s.id),
-                          })
-                        }
-                      >
-                        <Trash2 size={14} />
-                        Remove
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="grow">
-                        <h4>{s.name}</h4>
-                        <p>
-                          {s.target}
-                          {s.cadence ? ` · ${s.cadence} rpm` : ""}
-                          {s.rest
-                            ? ` · ${Math.round(s.rest)}s rest between reps`
-                            : ""}
-                        </p>
+                        <Field label="Minutes / rep">
+                          <input
+                            type="number"
+                            min=".1"
+                            step=".1"
+                            value={Number(s.minutes.toFixed(2))}
+                            onChange={(e) =>
+                              changeStep(s.id, { minutes: +e.target.value })
+                            }
+                          />
+                        </Field>
+                        <Field label="Repetitions">
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            value={s.reps}
+                            onChange={(e) =>
+                              changeStep(s.id, { reps: +e.target.value })
+                            }
+                          />
+                        </Field>
+                        <Field label="Meters / rep">
+                          <input
+                            type="number"
+                            min="0"
+                            step="25"
+                            value={s.distance}
+                            onChange={(e) =>
+                              changeStep(s.id, { distance: +e.target.value })
+                            }
+                          />
+                        </Field>
+                        <Field label="Rest (seconds)">
+                          <input
+                            type="number"
+                            min="0"
+                            value={Math.round(s.rest)}
+                            onChange={(e) =>
+                              changeStep(s.id, { rest: +e.target.value })
+                            }
+                          />
+                        </Field>
+                        <Field label="Target (pace / power / HR / RPE)">
+                          <input
+                            value={s.target}
+                            onChange={(e) =>
+                              changeStep(s.id, { target: e.target.value })
+                            }
+                          />
+                        </Field>
+                        <Field label="Training zone">
+                          <select
+                            value={s.zone}
+                            onChange={(e) =>
+                              changeStep(s.id, { zone: +e.target.value })
+                            }
+                          >
+                            {[1, 2, 3, 4, 5].map((z) => (
+                              <option key={z} value={z}>
+                                Zone {z}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        {w.sport === "Cycling" && (
+                          <Field label="Cadence (rpm)">
+                            <input
+                              type="number"
+                              value={s.cadence || 90}
+                              onChange={(e) =>
+                                changeStep(s.id, { cadence: +e.target.value })
+                              }
+                            />
+                          </Field>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setW({
+                              ...w,
+                              steps: w.steps.filter((st) => st.id !== s.id),
+                            })
+                          }
+                        >
+                          <Trash2 size={14} />
+                          Remove
+                        </Button>
                       </div>
-                      <span className="mono">
-                        {s.reps > 1 ? `${s.reps} × ` : ""}
-                        {w.sport === "Swimming"
-                          ? `${s.distance} m`
-                          : `${s.minutes.toFixed(0)} min`}
-                      </span>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
+                    ) : (
+                      <>
+                        <div className="grow">
+                          <h4>{s.name}</h4>
+                          <p>
+                            {s.target}
+                            {s.cadence ? ` · ${s.cadence} rpm` : ""}
+                            {s.rest
+                              ? ` · ${Math.round(s.rest)}s rest between reps`
+                              : ""}
+                          </p>
+                        </div>
+                        <span className="mono">
+                          {s.reps > 1 ? `${s.reps} × ` : ""}
+                          {w.sport === "Swimming"
+                            ? `${s.distance} m`
+                            : `${s.minutes.toFixed(0)} min`}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             <Field label="Coach notes / session notes">
               <textarea
                 value={w.notes}
@@ -623,6 +694,17 @@ export default function WorkoutDialog({
                 {error}
               </p>
             )}
+            <Field label="Session perceived effort (RPE)">
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={rpe}
+                onChange={(e) =>
+                  setRpe(Math.max(1, Math.min(10, +e.target.value)))
+                }
+              />
+            </Field>
             <div className="button-row wrap">
               <Button onClick={() => save()}>
                 <CalendarDays size={16} />
@@ -631,6 +713,10 @@ export default function WorkoutDialog({
               <Button
                 variant="outline"
                 onClick={() => {
+                  if (w.sport === "Strength") {
+                    launchStrength();
+                    return;
+                  }
                   setExecution(true);
                   setRunning(true);
                 }}
@@ -677,32 +763,7 @@ export default function WorkoutDialog({
                   <Button
                     variant="danger"
                     onClick={() => {
-                      setDb((d) => {
-                        const sessions = { ...d.sessions };
-                        delete sessions[sessionId!];
-                        const activities = Object.fromEntries(
-                          Object.entries(d.activities).map(([key, a]) => [
-                            key,
-                            a.sessionId === sessionId
-                              ? { ...a, sessionId: undefined }
-                              : a,
-                          ]),
-                        );
-                        const plans = Object.fromEntries(
-                          Object.entries(d.plans).map(([key, p]) => [
-                            key,
-                            {
-                              ...p,
-                              sessionIds: p.sessionIds.filter(
-                                (id) => id !== sessionId,
-                              ),
-                            },
-                          ]),
-                        );
-                        return { ...d, sessions, activities, plans };
-                      });
-                      toast("Session deleted.");
-                      onClose();
+                      try{setDb(removeSession(db,sessionId!));toast('Calendar entry removed. Activity history retained.');onClose();}catch(error){toast((error as Error).message)}
                     }}
                   >
                     Delete session

@@ -200,7 +200,7 @@ export function PageTitle({
   action?: ReactNode;
 }) {
   return (
-    <div className="page-title">
+    <div className={`page-title ${action ? "has-action" : ""}`}>
       <div>
         <div className="eyebrow">
           <span className="tiny-line" />

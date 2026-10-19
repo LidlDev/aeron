@@ -155,10 +155,27 @@ function Journey() {
 export default function Scene(props: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(true);
+  const [hidden, setHidden] = useState(document.hidden);
+  const [systemReduced, setSystemReduced] = useState(
+    matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const change = () => setHidden(document.hidden);
+    const query = matchMedia("(prefers-reduced-motion: reduce)");
+    const motion = () => setSystemReduced(query.matches);
+    document.addEventListener("visibilitychange", change);
+    query.addEventListener("change", motion);
+    return () => {
+      document.removeEventListener("visibilitychange", change);
+      query.removeEventListener("change", motion);
+    };
+  }, []);
   const [supported] = useState(() => {
     try {
       const c = document.createElement("canvas");
-      return !!(c.getContext("webgl2") || c.getContext("webgl"));
+      const context = c.getContext("webgl2") || c.getContext("webgl");
+      context?.getExtension("WEBGL_lose_context")?.loseContext();
+      return !!context;
     } catch {
       return false;
     }
@@ -168,8 +185,7 @@ export default function Scene(props: Props) {
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
   }, []);
-  const reduced =
-    props.reduced || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = props.reduced || systemReduced;
   return (
     <div
       className={`aeron-scene scene-${props.variant}`}
@@ -186,7 +202,7 @@ export default function Scene(props: Props) {
       {supported ? (
         <Canvas
           dpr={[1, 1.5]}
-          frameloop={!visible || reduced ? "demand" : "always"}
+          frameloop={!visible || hidden || reduced ? "demand" : "always"}
           camera={{ position: [0, 0, 5.2], fov: 42 }}
           gl={{ alpha: true, antialias: true, powerPreference: "low-power" }}
         >
@@ -207,7 +223,11 @@ export default function Scene(props: Props) {
           ) : props.variant === "journey" ? (
             <Journey />
           ) : (
-            <Float enabled={!reduced && visible} speed={1} floatIntensity={0.2}>
+            <Float
+              enabled={!reduced && visible && !hidden}
+              speed={1}
+              floatIntensity={0.2}
+            >
               <Ribbons {...props} reduced={reduced} />
             </Float>
           )}

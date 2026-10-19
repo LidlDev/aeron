@@ -13,7 +13,7 @@ export function trainingSummary(
   to = addDays(monday(), 6),
 ) {
   const sessions = Object.values(db.sessions).filter(
-    (s) => s.date >= from && s.date <= to,
+    (s) => !s.archived && s.date >= from && s.date <= to,
   );
   const activities = Object.values(db.activities).filter(
     (a) => a.date >= from && a.date <= to,
@@ -57,7 +57,7 @@ export function latestCheckin(db: Database) {
 }
 export function upcomingSessions(db: Database) {
   return Object.values(db.sessions)
-    .filter((s) => s.date >= today() && s.status === "planned")
+    .filter((s) => !s.archived && s.date >= today() && s.status === "planned")
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 export function phaseLabel(db: Database) {

@@ -1,5 +1,24 @@
 import { type Database, uid } from "./domain";
 export function removeSession(db: Database, id: string) {
+  const logs = Object.values(db.strengthLogs).filter((l) => l.sessionId === id);
+  if (logs.some((l) => !l.completed))
+    throw new Error(
+      "Finish or discard the active strength draft before deleting this session.",
+    );
+  if (logs.length)
+    return {
+      ...db,
+      sessions: {
+        ...db.sessions,
+        [id]: { ...db.sessions[id], archived: true },
+      },
+      plans: Object.fromEntries(
+        Object.entries(db.plans).map(([key, p]) => [
+          key,
+          { ...p, sessionIds: p.sessionIds.filter((sid) => sid !== id) },
+        ]),
+      ),
+    };
   const sessions = { ...db.sessions };
   delete sessions[id];
   return {

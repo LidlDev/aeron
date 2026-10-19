@@ -6,11 +6,8 @@ import {
   Download,
   Upload,
   RotateCcw,
-  Settings2,
   Watch,
   CheckCircle2,
-  Activity,
-  Link,
   Plus,
 } from "lucide-react";
 import {
@@ -28,7 +25,6 @@ import {
 import {
   type Athlete,
   type AthletePreferences,
-  type TrainingZones,
   generatePlan,
   applyPlan,
   storage,
@@ -679,14 +675,22 @@ export function Settings() {
       );
       return;
     }
-    setDb((d) => ({ ...d, athlete, zones }));
+    setDb((d) => ({
+      ...d,
+      athlete,
+      zones,
+      zoneHistory:
+        d.zones.ftp === zones.ftp
+          ? d.zoneHistory
+          : [...d.zoneHistory, { date: today(), ftp: zones.ftp }],
+    }));
     toast("Settings saved. Future plan generation uses your preferences.");
   }
   return (
     <>
       <PageTitle
         eyebrow="MAKE IT YOURS"
-        title="YOUR SYSTEM. YOUR RULES."
+        title="Settings"
         description="The details that make your training personal."
         action={
           <Button onClick={save}>
@@ -911,6 +915,7 @@ export function Settings() {
                     confirm === "reset"
                       ? { ...seed(), onboarded: true }
                       : storage.import(confirm);
+                  storage.replace(next);
                   setDb(next);
                   setAthlete(next.athlete);
                   setZones(next.zones);

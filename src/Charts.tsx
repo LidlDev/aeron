@@ -135,7 +135,10 @@ export function TrendChart({
       aria-label={`${keys.join(" and ")} trends in ${unit}`}
     >
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ left: -15, right: 15, top: 10 }}>
+        <LineChart
+          data={data}
+          margin={{ left: 0, right: 15, top: 10, bottom: 20 }}
+        >
           <CartesianGrid
             stroke="#263034"
             vertical={false}
@@ -147,15 +150,28 @@ export function TrendChart({
             axisLine={false}
             tickLine={false}
             minTickGap={40}
+            label={{
+              value: "Date",
+              position: "insideBottom",
+              offset: -14,
+              fill: "#68767D",
+              fontSize: 9,
+            }}
           />
           <YAxis
             tick={{ fill: "#9BA8AD", fontSize: 10 }}
             axisLine={false}
             tickLine={false}
-            unit={unit}
+            label={{
+              value: unit.trim(),
+              angle: -90,
+              position: "insideLeft",
+              fill: "#68767D",
+              fontSize: 9,
+            }}
           />
           <Tooltip {...tooltip} />
-          <Legend />
+          <Legend verticalAlign="top" />
           {keys.map((k, i) => (
             <Line
               type="monotone"
@@ -192,6 +208,65 @@ export function Spark({
             strokeWidth={1.5}
           />
         </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+export function HoursComparisonChart({
+  data,
+}: {
+  data: Record<string, number | string>[];
+}) {
+  return (
+    <div
+      className="chart"
+      role="img"
+      aria-label="Planned and completed weekly duration in hours"
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={data}
+          margin={{ top: 15, right: 15, left: 0, bottom: 20 }}
+        >
+          <CartesianGrid
+            stroke="#263034"
+            vertical={false}
+            strokeDasharray="3 5"
+          />
+          <XAxis
+            dataKey="date"
+            tick={{ fill: "#9BA8AD", fontSize: 10 }}
+            minTickGap={40}
+            label={{
+              value: "Week starting",
+              position: "insideBottom",
+              offset: -15,
+              fill: "#68767D",
+              fontSize: 10,
+            }}
+          />
+          <YAxis
+            tick={{ fill: "#9BA8AD", fontSize: 10 }}
+            unit="h"
+            label={{
+              value: "Hours",
+              angle: -90,
+              position: "insideLeft",
+              fill: "#68767D",
+              fontSize: 10,
+            }}
+          />
+          <Tooltip {...tooltip} />
+          <Legend verticalAlign="top" />
+          {["Planned", "Completed"].map((k, i) => (
+            <Bar
+              dataKey={k}
+              fill={i ? "#D6FF43" : "#52616a"}
+              radius={[3, 3, 0, 0]}
+              key={k}
+            />
+          ))}
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );

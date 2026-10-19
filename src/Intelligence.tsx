@@ -1,20 +1,10 @@
-import { useState, lazy, Suspense, useRef, useEffect } from "react";
+import { useState, lazy } from "react";
 import {
-  Send,
-  Sparkles,
-  ArrowRight,
-  Check,
-  X,
-  RotateCcw,
   Download,
-  Upload,
-  Watch,
-  Link,
   FileJson,
   Activity,
   ShieldCheck,
   AlertCircle,
-  ExternalLink,
 } from "lucide-react";
 import {
   useApp,
@@ -24,28 +14,10 @@ import {
   Button,
   Field,
   Badge,
-  Stat,
   Empty,
-  AeronScene,
   dateLabel,
 } from "./ui";
-import {
-  today,
-  addDays,
-  monday,
-  duration,
-  hours,
-  colors,
-  sports,
-  weeklyData,
-  coachReply,
-  decideRecommendation,
-  demoImport,
-  download,
-  uid,
-  type CoachMessage,
-  type Sport,
-} from "./domain";
+import { duration, hours, sports, demoImport, download, uid } from "./domain";
 const VolumeChart = lazy(() =>
   import("./Charts").then((m) => ({ default: m.VolumeChart })),
 );
@@ -55,265 +27,6 @@ const TrendChart = lazy(() =>
 const DistributionChart = lazy(() =>
   import("./Charts").then((m) => ({ default: m.DistributionChart })),
 );
-export function Coach() {
-  const { db, setDb, toast } = useApp();
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const bottom = useRef<HTMLDivElement>(null);
-  const prompts = [
-    "How is my training progressing?",
-    "Adjust my week because I’m feeling fatigued.",
-    "I only have 45 minutes tomorrow.",
-    "Can you explain my cycling progression?",
-    "What should I focus on for my 70.3?",
-    "Review my last four weeks.",
-  ];
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "auto", block: "nearest" });
-  }, [db.messages.length, busy]);
-  async function send(text: string) {
-    if (!text.trim() || busy) return;
-    setMessage("");
-    setBusy(true);
-    const result = coachReply(db, text);
-    const user: CoachMessage = { id: uid(), role: "user", text };
-    const response: CoachMessage = {
-      id: uid(),
-      role: "coach",
-      text: result.text,
-      recommendationId: result.recommendation?.id,
-    };
-    setDb((d) => ({
-      ...d,
-      messages: [...d.messages, user, response],
-      recommendations: result.recommendation
-        ? {
-            ...d.recommendations,
-            [result.recommendation.id]: result.recommendation,
-          }
-        : d.recommendations,
-    }));
-    setBusy(false);
-  }
-  function decide(id: string, action: "accepted" | "rejected" | "undone") {
-    try {
-      const next = decideRecommendation(db, id, action);
-      setDb(next);
-      toast(
-        action === "accepted"
-          ? "Calendar updated. You can undo this change."
-          : action === "undone"
-            ? "Original session restored."
-            : "Suggestion rejected.",
-      );
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  return (
-    <>
-      <PageTitle
-        eyebrow="INTELLIGENCE IN YOUR CORNER"
-        title="YOUR NEXT MOVE."
-        description="A little perspective. A clearer path forward."
-        action={
-          <Badge>
-            <span className="status-dot" />
-            DEMO COACH
-          </Badge>
-        }
-      />
-      <div className="coach-layout">
-        <Card className="chat-card">
-          <div className="chat-header">
-            <div className="coach-avatar">
-              <Sparkles size={20} />
-            </div>
-            <div>
-              <h3>AERON Coach</h3>
-              <p>Rule-based guidance · Grounded in your training</p>
-            </div>
-            <span className="status-dot" />
-          </div>
-          <div className="chat-messages">
-            {!db.messages.length && (
-              <div className="coach-welcome">
-                <Sparkles size={30} />
-                <h2>
-                  The plan adapts.
-                  <br />
-                  The intent stays.
-                </h2>
-                <p>
-                  I can review your training, help you make room for recovery,
-                  and adjust upcoming sessions. Changes always start with your
-                  approval.
-                </p>
-                <div className="suggested-prompts">
-                  {prompts.map((p) => (
-                    <button key={p} onClick={() => send(p)}>
-                      {p}
-                      <ArrowRight size={14} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {db.messages.map((m) => (
-              <div className={`chat-message ${m.role}`} key={m.id}>
-                <span className="eyebrow">
-                  {m.role === "coach"
-                    ? "AERON / DEMO COACH"
-                    : db.athlete.name.toUpperCase()}
-                </span>
-                <p>{m.text}</p>
-                {m.recommendationId &&
-                  (() => {
-                    const r = db.recommendations[m.recommendationId!];
-                    if (!r) return null;
-                    return (
-                      <div className="recommendation">
-                        <div className="eyebrow">PROPOSED CALENDAR CHANGE</div>
-                        <h4>
-                          {dateLabel(r.before.date)} · {r.workoutBefore.sport}
-                        </h4>
-                        <div className="change-comparison">
-                          <div>
-                            <small>CURRENT</small>
-                            <p>{r.workoutBefore.title}</p>
-                            <strong>{hours(duration(r.workoutBefore))}</strong>
-                          </div>
-                          <ArrowRight size={16} />
-                          <div>
-                            <small>PROPOSED</small>
-                            <p>{r.workoutAfter.title}</p>
-                            <strong className="lime">
-                              {hours(duration(r.workoutAfter))}
-                            </strong>
-                          </div>
-                        </div>
-                        <Badge>{r.status.toUpperCase()}</Badge>
-                        <div className="button-row">
-                          {r.status === "pending" ? (
-                            <>
-                              <Button
-                                size="sm"
-                                onClick={() => decide(r.id, "accepted")}
-                              >
-                                <Check size={14} />
-                                Accept change
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => decide(r.id, "rejected")}
-                              >
-                                <X size={14} />
-                                Reject
-                              </Button>
-                            </>
-                          ) : r.status === "accepted" ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => decide(r.id, "undone")}
-                            >
-                              <RotateCcw size={14} />
-                              Undo adjustment
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })()}
-              </div>
-            ))}
-            {busy && <div role="status">Reviewing your training…</div>}
-            <div ref={bottom} />
-          </div>
-          <form
-            className="chat-composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(message);
-            }}
-          >
-            <input
-              aria-label="Message your coach"
-              placeholder="What’s on your mind?"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-            />
-            <Button
-              size="icon"
-              aria-label="Send message"
-              type="submit"
-              disabled={busy || !message.trim()}
-            >
-              <Send size={18} />
-            </Button>
-          </form>
-          <p className="chat-disclaimer">
-            Demo Coach uses deterministic rules, not generative AI. No external
-            service is connected.
-          </p>
-        </Card>
-        <div className="coach-context">
-          <Card>
-            <SectionTitle title="Your training context" />
-            <div className="context-row">
-              <span>Objective</span>
-              <strong>{db.athlete.goal}</strong>
-            </div>
-            <div className="context-row">
-              <span>Phase</span>
-              <strong>Base building</strong>
-            </div>
-            <div className="context-row">
-              <span>Weekly availability</span>
-              <strong>{db.athlete.preferences.weeklyHours} hours</strong>
-            </div>
-            <div className="context-row">
-              <span>Recent baseline</span>
-              <strong>{db.athlete.preferences.baseline} hours</strong>
-            </div>
-            <div className="context-row">
-              <span>Latest fatigue</span>
-              <strong>
-                {Object.values(db.recovery).sort((a, b) =>
-                  b.date.localeCompare(a.date),
-                )[0]?.fatigue || "—"}
-                /5
-              </strong>
-            </div>
-          </Card>
-          <Card>
-            <SectionTitle title="Revision history" />
-            {Object.values(db.revisions).length ? (
-              Object.values(db.revisions)
-                .reverse()
-                .slice(0, 10)
-                .map((r) => (
-                  <div className="revision" key={r.id}>
-                    <RotateCcw size={14} />
-                    <div>
-                      <p>{r.description}</p>
-                      <small>{new Date(r.date).toLocaleString()}</small>
-                    </div>
-                  </div>
-                ))
-            ) : (
-              <p className="muted">
-                Accepted adjustments appear here. Every change can be reviewed
-                and undone.
-              </p>
-            )}
-          </Card>
-        </div>
-      </div>
-    </>
-  );
-}
 export function Integrations() {
   const { db, setDb, toast, openWorkout } = useApp();
   const [tab, setTab] = useState("Garmin");
@@ -352,7 +65,7 @@ export function Integrations() {
     <>
       <PageTitle
         eyebrow="YOUR TRAINING ECOSYSTEM"
-        title="CONNECTED BY INTENT."
+        title="Integrations"
         description="Your tools, one training environment. Always clear about what’s connected."
       />
       <div className="segmented page-tabs">

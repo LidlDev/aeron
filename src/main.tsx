@@ -32,8 +32,6 @@ import {
   X,
   Check,
   ChevronRight,
-  LogOut,
-  Command,
 } from "lucide-react";
 import {
   AppContext,
@@ -47,17 +45,17 @@ import {
   Badge,
   dateLabel,
 } from "./ui";
-import {
-  Overview,
-  Calendar,
-  Plans,
-  Library as WorkoutLibrary,
-} from "./Training";
-import { Strength, Nutrition, Recovery } from "./Wellness";
-import { Coach, Integrations } from "./Intelligence";
+import { Plans, Library as WorkoutLibrary } from "./Training";
+import { Nutrition, Recovery } from "./Wellness";
+import { Strength } from "./Strength";
+import { Overview } from "./Dashboard";
+import { Calendar } from "./Calendar";
+import { Integrations } from "./Intelligence";
+import { Coach } from "./Coach";
 import { Settings, Onboarding } from "./Profile";
-import { today, duration, type Sport } from "./domain";
+import { today, duration, storage } from "./domain";
 import "./styles.css";
+import "./v2.css";
 const Analytics = lazy(() =>
   import("./Analytics").then((m) => ({ default: m.Analytics })),
 );
@@ -123,6 +121,20 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
   const onboard = location.pathname === "/onboarding";
+  const block = Object.values(db.plans).at(-1);
+  const blockWeek = block
+    ? Math.max(
+        1,
+        Math.min(
+          4,
+          Math.floor(
+            (new Date(today() + "T12:00:00").getTime() -
+              new Date(block.start + "T12:00:00").getTime()) /
+              604800000,
+          ) + 1,
+        ),
+      )
+    : 1;
   const upcoming = Object.values(db.sessions)
     .filter((s) => s.date >= today() && s.status === "planned")
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -190,7 +202,9 @@ function App() {
                     CURRENT PHASE
                   </div>
                   <strong>
-                    Base building
+                    {block?.phase === "Base"
+                      ? "Base building"
+                      : block?.phase || "Base building"}
                     <ArrowUpRight size={15} />
                   </strong>
                   <p>Strong foundations. Long horizons.</p>
@@ -198,7 +212,7 @@ function App() {
                     <i />
                   </div>
                   <span>
-                    WEEK 01 <span>/ 04</span>
+                    WEEK {String(blockWeek).padStart(2, "0")} <span>/ 04</span>
                   </span>
                 </div>
                 <button
@@ -233,6 +247,9 @@ function App() {
                   >
                     <Menu size={20} />
                   </button>
+                  <div className="mobile-only mobile-brand">
+                    <Logo />
+                  </div>
                   <span className="topbar-breadcrumb">
                     WORKSPACE <ChevronRight size={12} />{" "}
                     <b>
@@ -301,6 +318,13 @@ function App() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      onClick={() => storage.original()}
+                    >
+                      Download original
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setNotice("")}
                     >
                       Dismiss
@@ -353,7 +377,13 @@ function App() {
                   <span>
                     AERON <b>®</b> · INTELLIGENCE IN MOTION.
                   </span>
-                  <span>YOUR EFFORT. YOUR EVOLUTION.</span>
+                  <a
+                    href="https://github.com/LidlDev/aeron"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    V2 · Source & AGPL license ↗
+                  </a>
                 </footer>
               </main>
             </div>

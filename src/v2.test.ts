@@ -393,3 +393,24 @@ describe("V2 metric semantics", () => {
     ).toBe(40);
   });
 });
+
+describe("Canonical strength history deletion guard", () => {
+  it("archives a completed strength calendar entry without breaking logs or duplicating history", () => {
+    const started = startStrength(seed(), "A");
+    let db = started.db;
+    const logId = started.logId;
+    const log = db.strengthLogs[logId];
+    expect(() => removeSession(db, log.sessionId!)).toThrow(/active strength/);
+    const regenerated = applyPlan(db, generatePlan(db.athlete, db.workouts));
+    expect(regenerated.sessions[log.sessionId!]).toBeDefined();
+    expect(validateDatabase(regenerated)).toBe(true);
+    const set = log.sets.find((s) => s.kind === "working")!;
+    db = updateStrengthSet(db, logId, set.id, { done: true });
+    db = finishStrength(db, logId);
+    const count = Object.keys(db.activities).length;
+    db = removeSession(db, log.sessionId!);
+    expect(db.sessions[log.sessionId!].archived).toBe(true);
+    expect(validateDatabase(migrateV2(db))).toBe(true);
+    expect(Object.keys(db.activities)).toHaveLength(count);
+  });
+});
