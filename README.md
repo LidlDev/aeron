@@ -15,7 +15,7 @@ Open http://localhost:3000. The dev server listens on all interfaces. On a phone
 
 ## GitHub Pages
 
-The included `.github/workflows/pages.yml` runs domain tests, checks TypeScript, builds Vite, and deploys `dist` using GitHub Pages. Set **Settings → Pages → Source → GitHub Actions**. Every push to `main` rebuilds and redeploys. Relative asset URLs and hash routing support repository subpaths.
+The included `.github/workflows/pages.yml` runs domain and mobile browser tests, checks TypeScript, builds Vite, and deploys `dist` using GitHub Pages. Set **Settings → Pages → Source → GitHub Actions**. Every push to `main` rebuilds and redeploys. Relative asset URLs and hash routing support repository subpaths.
 
 ## Features
 
@@ -46,6 +46,8 @@ npm run build
 ```
 
 The automated domain tests cover library completeness, plan volume safety, history preservation, accurate intervals and swim distance, completion, coach acceptance/undo, Strava deduplication, and backup validation.
+
+The optional `scripts/browser-smoke.py` uses Python Playwright and Chromium. The GitHub workflow installs these and runs the complete mobile acceptance path against the production build before deploying.
 
 ## Stack
 

@@ -27,6 +27,21 @@ jobs:
         run: npm test
       - name: Build application
         run: npm run build
+      - name: Set up Python for browser checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install browser test tools
+        run: |
+          pip install playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Test mobile workflows against production build
+        env:
+          AERON_URL: http://localhost:3001
+          CHROMIUM_PATH: ""
+        run: |
+          python -m http.server 3001 --bind 127.0.0.1 --directory dist > /tmp/aeron-preview.log 2>&1 &
+          python scripts/browser-smoke.py
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload production build
