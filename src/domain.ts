@@ -1,3 +1,4 @@
+import { migrateV2 } from "./migrations";
 export type Sport = "Running" | "Cycling" | "Swimming" | "Strength";
 export const sports: Sport[] = ["Swimming", "Cycling", "Running", "Strength"];
 export const colors: Record<Sport, string> = {
@@ -92,9 +93,13 @@ export interface Workout {
   steps: WorkoutStep[];
   notes: string;
   indoor: boolean;
+  poolLength?: 25 | 50;
   brickId?: string;
+  strengthTemplateId?: string;
 }
 export interface PlannedSession {
+  origin?: "plan" | "manual" | "import";
+  coachProtected?: boolean;
   id: string;
   workoutId: string;
   date: string;
@@ -110,11 +115,13 @@ export interface CompletedActivity {
   distance: number;
   rpe: number;
   source: "Demo history" | "AERON" | "Strava demo";
+  stepCompletion?: { completed: number; total: number };
   power?: number;
   pace?: number;
   notes: string;
 }
 export interface TrainingPlan {
+  capacityMinutes?: number[];
   id: string;
   phase: "Base" | "Build" | "Peak" | "Taper" | "Recovery";
   start: string;
@@ -129,6 +136,12 @@ export interface Exercise {
   muscles: string[];
   equipment: string;
   difficulty: string;
+  unilateral?: boolean;
+  compound?: boolean;
+  origin?: string;
+  classification?: string;
+  upstreamIds?: string[];
+  source?: string;
   technique: string[];
   guidance: string;
   mistakes: string;
@@ -136,6 +149,16 @@ export interface Exercise {
   substitutions: string[];
 }
 export interface StrengthSet {
+  entryId?: string;
+  kind?: "warmup" | "working";
+  mode?: "reps" | "time";
+  seconds?: number;
+  targetSeconds?: number;
+  targetReps?: number;
+  targetSetCount?: number;
+  restSeconds?: number;
+  rir?: number;
+  superset?: string;
   id: string;
   sessionId: string;
   exerciseId: string;
@@ -144,7 +167,43 @@ export interface StrengthSet {
   rpe: number;
   done: boolean;
 }
+export interface StrengthExercise {
+  id: string;
+  exerciseId: string;
+  sets: number;
+  reps: number;
+  minReps: number;
+  weight: number;
+  seconds: number;
+  mode: "reps" | "time";
+  restSeconds: number;
+  warmupSets: number;
+  rpe: number;
+  rir: number;
+  progression: "off" | "linear" | "double" | "time";
+  increment: number;
+  superset: string;
+}
+export interface StrengthWorkout {
+  id: string;
+  name: string;
+  minutes: number;
+  notes: string;
+  entries: StrengthExercise[];
+}
 export interface StrengthLog {
+  sessionId?: string;
+  minutes?: number;
+  activeEntryId?: string;
+  startedAt?: number;
+  elapsedSeconds?: number;
+  paused?: boolean;
+  restEndsAt?: number;
+  restRemaining?: number;
+  workEndsAt?: number;
+  workRemaining?: number;
+  workSetId?: string;
+
   id: string;
   date: string;
   template: string;
@@ -192,7 +251,16 @@ export interface FuelingPlan {
   tolerance: number;
   items: FuelItem[];
 }
+export type RevisionState =
+  "Proposed" | "Validated" | "Approved" | "Rejected" | "Applied" | "Reverted";
 export interface CoachRecommendation {
+  lifecycle?: RevisionState;
+  trigger?: string;
+  evidence?: string[];
+  reason?: string;
+  expectedEffect?: string;
+  confidence?: string;
+
   id: string;
   text: string;
   sessionId: string;
@@ -203,6 +271,7 @@ export interface CoachRecommendation {
   status: "pending" | "accepted" | "rejected" | "undone";
 }
 export interface PlanRevision {
+  state?: RevisionState;
   id: string;
   date: string;
   recommendationId: string;
@@ -229,7 +298,9 @@ export interface WorkoutExport {
   manual: boolean;
 }
 export interface Database {
-  version: 1;
+  version: 2;
+  strengthWorkouts: Record<string, StrengthWorkout>;
+  zoneHistory: { date: string; ftp: number }[];
   onboarded: boolean;
   athlete: Athlete;
   zones: TrainingZones;
@@ -732,6 +803,26 @@ export const templates = {
   A: ["ex-2", "ex-3", "ex-5", "ex-10", "ex-19", "ex-20"],
   B: ["ex-7", "ex-9", "ex-13", "ex-14", "ex-18", "ex-25"],
 };
+export function resizedSteps(w: Workout, minutes: number): WorkoutStep[] {
+  const factor = minutes / duration(w);
+  return w.steps.map((st) => {
+    const pool = w.poolLength || 25;
+    const meters =
+      w.sport === "Swimming" && st.distance > 0
+        ? Math.max(pool, Math.floor((st.distance * factor) / pool) * pool)
+        : st.distance;
+    return {
+      ...st,
+      id: uid(),
+      distance: meters,
+      minutes:
+        w.sport === "Swimming" && st.distance > 0
+          ? (st.minutes * meters) / st.distance
+          : st.minutes * factor,
+      rest: st.rest * factor,
+    };
+  });
+}
 export function generatePlan(
   athlete: Athlete,
   library: Record<string, Workout>,
@@ -750,14 +841,14 @@ export function generatePlan(
   const sessions: PlannedSession[] = [];
   const workouts: Workout[] = [];
   for (let week = 0; week < 4; week++) {
-    let allocations: {
+    const allocations: {
       day: number;
       sport: Sport;
       weight: number;
       index: number;
     }[] = [];
     for (const day of available) {
-      let sport: Sport =
+      const sport: Sport =
         day === p.longRide
           ? "Cycling"
           : day === p.longRun
@@ -774,9 +865,22 @@ export function generatePlan(
         index: day === p.longRide || day === p.longRun ? 1 : 0,
       });
     }
-    const strDays = available
-      .filter((d) => d !== p.longRide && d !== p.longRun)
-      .slice(0, p.strengthSessions);
+    const candidates = available.filter(
+      (d) => d !== p.longRide && d !== p.longRun,
+    );
+    const strDays: number[] = [];
+    while (strDays.length < Math.min(p.strengthSessions, candidates.length)) {
+      const score = (d: number) =>
+        ([(d + 1) % 7].some((next) => next === p.longRide || next === p.longRun)
+          ? 20
+          : 0) +
+        (strDays.some((other) => Math.abs(other - d) < 2) ? 10 : 0) +
+        d * 0.01;
+      const day = candidates
+        .filter((d) => !strDays.includes(d))
+        .sort((a, b) => score(a) - score(b))[0];
+      strDays.push(day);
+    }
     if (p.doubleDays)
       strDays.forEach((day) =>
         allocations.push({ day, sport: "Strength", weight: 0.7, index: 0 }),
@@ -789,24 +893,43 @@ export function generatePlan(
           a.weight = 0.7;
         }
       });
-    const sum = allocations.reduce((n, a) => n + a.weight, 0);
+
     for (const a of allocations) {
       const id = uid();
-      const mins = Math.max(5, Math.round((weeks[week] * a.weight) / sum));
+      const strengthCount = allocations.filter(
+        (a) => a.sport === "Strength",
+      ).length;
+      const strengthMinutes = Math.min(
+        45,
+        Math.floor((weeks[week] * 0.3) / Math.max(1, strengthCount)),
+      );
+      const enduranceWeight = allocations
+        .filter((a) => a.sport !== "Strength")
+        .reduce((n, a) => n + a.weight, 0);
+      const mins =
+        a.sport === "Strength"
+          ? Math.max(5, strengthMinutes)
+          : Math.max(
+              5,
+              Math.round(
+                ((weeks[week] - strengthMinutes * strengthCount) * a.weight) /
+                  Math.max(0.1, enduranceWeight),
+              ),
+            );
       const source =
         library[`${a.sport.toLowerCase()}-${a.index}`] ||
         Object.values(library).find((w) => w.sport === a.sport)!;
       if (!source) continue;
-      const factor = mins / duration(source);
       const w: Workout = {
         ...source,
         id,
-        steps: source.steps.map((s) => ({
-          ...s,
-          id: uid(),
-          minutes: s.minutes * factor,
-          rest: s.rest * factor,
-        })),
+        strengthTemplateId:
+          a.sport === "Strength"
+            ? strDays.indexOf(a.day) === 0
+              ? "A"
+              : "B"
+            : undefined,
+        steps: resizedSteps(source, mins),
         title:
           a.sport === "Strength"
             ? `Strength ${strDays.indexOf(a.day) === 0 ? "A" : "B"} · endurance support`
@@ -822,12 +945,35 @@ export function generatePlan(
       });
     }
   }
+  const actualWeeks = weeks.map((capacity, i) => {
+    const ids = new Set(
+      sessions
+        .filter(
+          (s) =>
+            s.date >= addDays(start, i * 7) &&
+            s.date < addDays(start, (i + 1) * 7),
+        )
+        .map((s) => s.workoutId),
+    );
+    const ws = workouts.filter((w) => ids.has(w.id));
+    const total = ws.reduce((n, w) => n + duration(w), 0);
+    if (total > capacity) {
+      const adjustable = ws.filter((w) => w.sport !== "Swimming").at(-1);
+      if (adjustable)
+        adjustable.steps = resizedSteps(
+          adjustable,
+          Math.max(1, duration(adjustable) - (total - capacity)),
+        );
+    }
+    return ws.reduce((n, w) => n + duration(w), 0);
+  });
   return {
     plan: {
       id: uid(),
       phase: "Base",
       start,
-      weeks,
+      weeks: actualWeeks,
+      capacityMinutes: weeks,
       objective: athlete.raceDate
         ? `${athlete.goal} · ${athlete.raceDate}`
         : "Rolling base-building",
@@ -909,7 +1055,9 @@ export function seed(): Database {
     },
   };
   const db: Database = {
-    version: 1,
+    version: 2,
+    strengthWorkouts: {},
+    zoneHistory: [],
     onboarded: false,
     athlete,
     zones: { ftp: 240, maxHR: 185, thresholdPace: 300, swimPace: 120 },
@@ -1058,12 +1206,13 @@ export function seed(): Database {
   plan.workouts.forEach((w) => (db.workouts[w.id] = w));
   plan.sessions.forEach((s) => (db.sessions[s.id] = s));
   db.plans[plan.plan.id] = plan.plan;
-  return db;
+  return migrateV2(db);
 }
 export function completeSession(
   db: Database,
   id: string,
   minutes?: number,
+  rpe = 4,
 ): Database {
   const s = db.sessions[id];
   if (!s || s.status === "completed") return db;
@@ -1075,7 +1224,7 @@ export function completeSession(
     date: today(),
     minutes: minutes ?? duration(w),
     distance: estimateDistance(w),
-    rpe: 4,
+    rpe,
     source: "AERON",
     notes: s.notes,
   };
@@ -1092,13 +1241,18 @@ export function applyPlan(
   const sessions = { ...db.sessions };
   const workouts = { ...db.workouts };
   Object.values(sessions)
-    .filter((s) => s.date >= generated.plan.start && s.status === "planned")
+    .filter(
+      (s) =>
+        s.date >= generated.plan.start &&
+        s.status === "planned" &&
+        !s.coachProtected,
+    )
     .forEach((s) => delete sessions[s.id]);
   generated.workouts.forEach((w) => (workouts[w.id] = w));
   generated.sessions.forEach((s) => {
     const alreadyCompleted = Object.values(sessions).some(
       (old) =>
-        old.status === "completed" &&
+        (old.status === "completed" || old.coachProtected) &&
         old.date === s.date &&
         db.workouts[old.workoutId]?.sport === workouts[s.workoutId]?.sport,
     );
@@ -1119,14 +1273,63 @@ export function applyPlan(
     },
   };
 }
+export function importActivity(
+  db: Database,
+  activity: CompletedActivity,
+): Database {
+  if (db.activities[activity.id]) return db;
+  if (
+    !db.workouts[activity.workoutId] ||
+    !Number.isFinite(activity.minutes) ||
+    activity.minutes <= 0 ||
+    !Number.isFinite(activity.distance) ||
+    activity.distance < 0
+  )
+    throw new Error("Invalid activity data.");
+  const sport = db.workouts[activity.workoutId].sport;
+  const matches = Object.values(db.sessions)
+    .filter(
+      (s) =>
+        s.status === "planned" &&
+        s.date === activity.date &&
+        db.workouts[s.workoutId].sport === sport &&
+        Math.abs(duration(db.workouts[s.workoutId]) - activity.minutes) <=
+          Math.max(15, activity.minutes * 0.25),
+    )
+    .sort(
+      (a, b) =>
+        Math.abs(duration(db.workouts[a.workoutId]) - activity.minutes) -
+        Math.abs(duration(db.workouts[b.workoutId]) - activity.minutes),
+    );
+  const matched = matches[0];
+  const sid = matched?.id || `import-${activity.id}`;
+  const session = matched
+    ? { ...matched, status: "completed" as const }
+    : {
+        id: sid,
+        date: activity.date,
+        workoutId: activity.workoutId,
+        status: "completed" as const,
+        origin:'import' as const,
+        notes: "Imported activity; no matching planned session.",
+      };
+  return {
+    ...db,
+    sessions: { ...db.sessions, [sid]: session },
+    activities: {
+      ...db.activities,
+      [activity.id]: { ...activity, sessionId: sid },
+    },
+  };
+}
 export function demoImport(db: Database): Database {
-  const activities = { ...db.activities };
+  let next = db;
   let count = 0;
   for (let i = 0; i < 3; i++) {
     const id = `strava-demo-${i}`;
-    if (activities[id]) continue;
+    if (next.activities[id]) continue;
     const w = db.workouts[`cycling-${i}`];
-    activities[id] = {
+    next = importActivity(next, {
       id,
       workoutId: w.id,
       date: addDays(today(), -i - 1),
@@ -1135,20 +1338,20 @@ export function demoImport(db: Database): Database {
       rpe: 4,
       source: "Strava demo",
       power: 180 + i * 5,
-      notes: "Demo import, fictional activity",
-    };
+      notes:
+        "Fictional demo activity · stable provider ID · normalized minutes, km and watts",
+    });
     count++;
   }
   return {
-    ...db,
-    activities,
+    ...next,
     integrations: {
-      ...db.integrations,
+      ...next.integrations,
       strava: {
-        ...db.integrations.strava,
+        ...next.integrations.strava,
         status: "Demo",
         lastSync: new Date().toISOString(),
-        imports: db.integrations.strava.imports + count,
+        imports: next.integrations.strava.imports + count,
       },
     },
   };
@@ -1167,7 +1370,10 @@ export function coachReply(
     .filter((a) => a.date >= addDays(today(), -28))
     .reduce((n, a) => n + a.minutes, 0);
   const fatigued =
-    (check?.fatigue ?? 0) >= 4 || /fatig|tired|stress/i.test(prompt);
+    (check &&
+      check.date >= addDays(today(), -7) &&
+      (check.fatigue >= 4 || check.sleep < 6)) ||
+    /fatig|tired|stress/i.test(prompt);
   const short = /45|time|busy|minutes/i.test(prompt);
   const preferred = /tomorrow/i.test(prompt)
     ? upcoming.filter((s) => s.date === addDays(today(), 1))
@@ -1179,16 +1385,12 @@ export function coachReply(
   if ((fatigued || short) && s) {
     const w = db.workouts[s.workoutId];
     const target = Math.min(duration(w), short ? 45 : duration(w) * 0.65);
-    const scale = target / duration(w);
     const changed = {
       ...w,
       id: uid(),
       title: `${short ? "Time-adjusted" : "Easy recovery"} · ${w.title}`,
-      steps: w.steps.map((st) => ({
+      steps: resizedSteps(w, target).map((st) => ({
         ...st,
-        id: uid(),
-        minutes: st.minutes * scale,
-        rest: st.rest * scale,
         zone: fatigued ? 1 : st.zone,
         target: fatigued ? "Easy conversational effort · RPE 2" : st.target,
       })),
@@ -1202,6 +1404,28 @@ export function coachReply(
       workoutBefore: w,
       workoutAfter: changed,
       status: "pending",
+      lifecycle: "Proposed",
+      trigger: short
+        ? "Reduced time availability"
+        : (check?.fatigue || 0) >= 4
+          ? "Elevated recorded fatigue"
+          : "Athlete-reported fatigue",
+      evidence: [
+        `Next planned session: ${s.date} · ${Math.round(duration(w))} min`,
+        ...(check
+          ? [
+              `Check-in ${check.date}: fatigue ${check.fatigue}/5, sleep ${check.sleep}h`,
+            ]
+          : []),
+        `Recorded last 28 days: ${Math.round(total)} minutes`,
+      ],
+      reason: short
+        ? "Fit the session within available time while retaining a warm-up and cool-down."
+        : "Reduce intensity and volume while the athlete reports elevated fatigue.",
+      expectedEffect:
+        "Less near-term training demand. Adaptation and readiness are not guaranteed or predicted.",
+      confidence:
+        "Rule-based suggestion. Subjective check-ins and limited activity data create uncertainty.",
     };
     return { text: rec.text, recommendation: rec };
   }
@@ -1224,7 +1448,7 @@ export function decideRecommendation(
   if (!r) return db;
   if (
     (action === "accepted" && r.status !== "pending") ||
-    (action === "undone" && r.status !== "accepted")
+    (action === "undone" && r.status !== "accepted") || (action==='rejected'&&r.status!=='pending')
   )
     return db;
   const current = db.sessions[r.sessionId];
@@ -1232,12 +1456,39 @@ export function decideRecommendation(
     ...db,
     recommendations: { ...db.recommendations, [id]: { ...r, status: action } },
   };
-  if (action === "rejected") return next;
+  if (action === "rejected")
+    return {
+      ...next,
+      recommendations: {
+        ...next.recommendations,
+        [id]: { ...r, status: "rejected", lifecycle: "Rejected" },
+      },
+      revisions: {
+        ...db.revisions,
+        [`rejected-${id}`]: {
+          id: `rejected-${id}`,
+          date: new Date().toISOString(),
+          recommendationId: id,
+          state: "Rejected",
+          description: "Rejected proposed adaptation",
+        },
+      },
+    };
   if (!current || current.status === "completed")
     throw new Error(
       "This session has been completed or removed. It cannot be revised.",
     );
-  if (action === "undone" && current.workoutId !== r.after.workoutId)
+  if (
+    action === "accepted" &&
+    (current.workoutId !== r.before.workoutId || current.date !== r.before.date || current.status!==r.before.status || current.notes!==r.before.notes)
+  )
+    throw new Error(
+      "This proposal is stale. The session changed after it was proposed. Request a new recommendation.",
+    );
+  if (
+    action === "undone" &&
+    (current.workoutId !== r.after.workoutId || current.date !== r.after.date || current.status!==r.after.status || current.notes!==r.after.notes)
+  )
     throw new Error(
       "The session has changed since this recommendation. Edit it in the calendar.",
     );
@@ -1245,6 +1496,7 @@ export function decideRecommendation(
     id: uid(),
     date: new Date().toISOString(),
     recommendationId: id,
+    state: action === "accepted" ? "Applied" : "Reverted",
     description:
       action === "accepted"
         ? "Accepted coach adjustment"
@@ -1252,12 +1504,41 @@ export function decideRecommendation(
   };
   return {
     ...next,
+    recommendations: {
+      ...db.recommendations,
+      [id]: {
+        ...r,
+        status: action,
+        lifecycle: action === "accepted" ? "Applied" : "Reverted",
+      },
+    },
     workouts: { ...db.workouts, [r.workoutAfter.id]: r.workoutAfter },
     sessions: {
       ...db.sessions,
-      [r.sessionId]: action === "accepted" ? r.after : r.before,
+      [r.sessionId]:
+        action === "accepted" ? { ...r.after, coachProtected: true } : r.before,
     },
-    revisions: { ...db.revisions, [rev.id]: rev },
+    revisions: {
+      ...db.revisions,
+      ...(action === "accepted"
+        ? Object.fromEntries(
+            ["Validated", "Approved"].map((state) => [
+              `${id}-${state}`,
+              {
+                id: `${id}-${state}`,
+                date: rev.date,
+                recommendationId: id,
+                state: state as RevisionState,
+                description:
+                  state === "Validated"
+                    ? "Proposal validated against current session"
+                    : "Athlete approved change",
+              },
+            ]),
+          )
+        : {}),
+      [rev.id]: rev,
+    },
   };
 }
 export function weeklyData(db: Database, n = 12) {
@@ -1286,13 +1567,16 @@ export function weeklyData(db: Database, n = 12) {
     return data;
   });
 }
-const STORAGE_KEY = "aeron.database.v1";
+const STORAGE_KEY = "aeron.database.v2";
+const LEGACY_KEY = "aeron.database.v1";
+let blockedRaw: string | null = null;
+let pendingLegacyRaw: string | null = null;
 export function validateDatabase(value: unknown): value is Database {
   try {
     if (!value || typeof value !== "object") return false;
     const d = value as Database;
     if (
-      d.version !== 1 ||
+      d.version !== 2 ||
       !d.athlete?.preferences ||
       !d.zones ||
       !Array.isArray(d.messages) ||
@@ -1341,6 +1625,58 @@ export function validateDatabase(value: unknown): value is Database {
       if (!d[key] || typeof d[key] !== "object" || Array.isArray(d[key]))
         return false;
     if (
+      !d.strengthWorkouts ||
+      !Array.isArray(d.zoneHistory) ||
+      !d.zoneHistory.every((z) => Number.isFinite(z.ftp) && z.ftp > 0)
+    )
+      return false;
+    if (
+      !Object.values(d.exercises).every(
+        (e) =>
+          typeof e.name === "string" &&
+          Array.isArray(e.muscles) &&
+          Array.isArray(e.technique),
+      )
+    )
+      return false;
+    if (
+      !Object.values(d.strengthWorkouts).every(
+        (w) =>
+          typeof w.name === "string" &&
+          Number.isFinite(w.minutes) &&
+          w.minutes > 0 &&
+          Array.isArray(w.entries) &&
+          w.entries.every(
+            (e) =>
+              !!d.exercises[e.exerciseId] &&
+              Number.isInteger(e.sets) &&
+              e.sets > 0 &&
+              Number.isFinite(e.weight) &&
+              e.weight >= 0,
+          ),
+      )
+    )
+      return false;
+    if (
+      !Object.values(d.strengthLogs).every(
+        (l) =>
+          Array.isArray(l.sets) &&
+          !!d.sessions[l.sessionId || ""] &&
+          l.sets.every(
+            (s) =>
+              !!d.exercises[s.exerciseId] &&
+              Number.isFinite(s.weight) &&
+              s.weight >= 0 &&
+              Number.isFinite(s.reps) &&
+              s.reps >= 0 &&
+              Number.isFinite(s.rpe) &&
+              s.rpe >= 1 &&
+              s.rpe <= 10,
+          ),
+      )
+    )
+      return false;
+    if (
       !d.integrations.garmin ||
       !d.integrations.strava ||
       Object.keys(d.workouts).length === 0
@@ -1385,34 +1721,70 @@ export function validateDatabase(value: unknown): value is Database {
 }
 export const storage = {
   load(): { data: Database; warning: string } {
+    blockedRaw = null;
+    pendingLegacyRaw = null;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const current = localStorage.getItem(STORAGE_KEY);
+      const legacy = current ? null : localStorage.getItem(LEGACY_KEY);
+      const raw = current || legacy;
       if (!raw) return { data: seed(), warning: "" };
-      const data: unknown = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      const data = migrateV2(parsed);
       if (!validateDatabase(data))
-        return {
-          data: seed(),
-          warning:
-            "Stored data could not be read. A fresh demo has been loaded. Your original data remains in browser storage until you save.",
-        };
-      return { data, warning: "" };
-    } catch {
+        throw new Error("Invalid stored relationships or values.");
+      if (legacy) pendingLegacyRaw = legacy;
+      return {
+        data,
+        warning: legacy
+          ? "Your V1 data was migrated to V2. The original is retained; a backup is created on your next save."
+          : "",
+      };
+    } catch (error) {
+      try {
+        blockedRaw =
+          localStorage.getItem(STORAGE_KEY) ||
+          localStorage.getItem(LEGACY_KEY) ||
+          "";
+      } catch {
+        blockedRaw = "";
+      }
       return {
         data: seed(),
         warning:
-          "Browser storage is unavailable or invalid. Export your data to keep a backup.",
+          "Saved data needs recovery. Showing a temporary demo; original data is untouched. Download the original or import a backup in Settings. Saving is blocked until you explicitly replace it.",
       };
     }
   },
   save(data: Database) {
+    if (blockedRaw !== null)
+      throw new Error(
+        "Storage recovery required. Your original data is protected.",
+      );
+    if (pendingLegacyRaw) {
+      if (!localStorage.getItem("aeron.database.v1.backup"))
+        localStorage.setItem("aeron.database.v1.backup", pendingLegacyRaw);
+      pendingLegacyRaw = null;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   },
+  replace(data: Database) {
+    if (!validateDatabase(data)) throw new Error("Invalid replacement data.");
+    if (blockedRaw !== null)
+      localStorage.setItem("aeron.recovery.backup", blockedRaw);
+    blockedRaw = null;
+    this.save(data);
+  },
+  original() {
+    const raw =
+      blockedRaw ??
+      localStorage.getItem("aeron.database.v1.backup") ??
+      localStorage.getItem(LEGACY_KEY);
+    download("aeron-original-data.json", raw || "{}");
+  },
   import(text: string) {
-    const value: unknown = JSON.parse(text);
+    const value = migrateV2(JSON.parse(text));
     if (!validateDatabase(value))
-      throw new Error(
-        "Invalid AERON backup or unsupported schema version. No data was replaced.",
-      );
+      throw new Error("Invalid AERON backup. No data was replaced.");
     return value;
   },
   export(data: Database) {

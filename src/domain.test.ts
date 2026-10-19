@@ -11,8 +11,6 @@ import {
   storage,
   duration,
   distance,
-  today,
-  uid,
 } from "./domain";
 describe("AERON training workflows", () => {
   it("has 60 complete workouts, 30 exercises, valid history, and a four-week plan", () => {
@@ -32,7 +30,7 @@ describe("AERON training workflows", () => {
     db.athlete.preferences.baseline = 4;
     db.athlete.preferences.weeklyHours = 14;
     const g = generatePlan(db.athlete, db.workouts);
-    expect(g.plan.weeks).toEqual([240, 252, 264, 192]);
+    expect(g.plan.capacityMinutes).toEqual([240, 252, 264, 192]);
     for (const s of g.sessions) {
       expect((new Date(s.date + "T12:00:00").getDay() + 6) % 7).not.toBe(
         db.athlete.preferences.restDay,
@@ -52,7 +50,9 @@ describe("AERON training workflows", () => {
         (n, s) => n + duration(g.workouts.find((w) => w.id === s.workoutId)!),
         0,
       );
-    expect(volume).toBeCloseTo(240, -1);
+    expect(volume).toBeCloseTo(g.plan.weeks[0], 5);
+    expect(volume).toBeLessThanOrEqual(240);
+    expect(volume).toBeGreaterThan(216);
   });
   it("completion adds one activity and regenerating preserves completed history", () => {
     let db = seed();
@@ -85,7 +85,9 @@ describe("AERON training workflows", () => {
     ).toBeLessThan(duration(r.workoutBefore));
     db = decideRecommendation(db, r.id, "undone");
     expect(db.sessions[r.sessionId].workoutId).toBe(old);
-    expect(Object.keys(db.revisions)).toHaveLength(2);
+    expect(Object.values(db.revisions).map((r) => r.state)).toEqual(
+      expect.arrayContaining(["Validated", "Approved", "Applied", "Reverted"]),
+    );
   });
   it("deduplicates Strava demo imports", () => {
     const first = demoImport(seed());
